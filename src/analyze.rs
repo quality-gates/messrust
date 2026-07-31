@@ -1,13 +1,13 @@
-//! Syntax-only analysis for the codesize rule catalog.
+//! Syntax-only analysis for codesize, naming, and unusedcode rules.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
-    Fields, FnArg, Item, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemTrait, ItemUnion, Pat, PatType,
-    ReturnType, Visibility,
+    Fields, FnArg, Item, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemTrait, ItemUnion, Member, Pat,
+    PatType, ReturnType, Visibility,
 };
 
 use crate::metrics::{cyclomatic_complexity, effective_lines_of_code, npath_complexity};
@@ -33,6 +33,10 @@ pub enum RuleKind {
     ShortMethodName,
     ConstantNamingConventions,
     BooleanGetMethodName,
+    UnusedPrivateField,
+    UnusedLocalVariable,
+    UnusedPrivateMethod,
+    UnusedFormalParameter,
 }
 
 const DEFAULT_CCN: usize = 10;
@@ -463,6 +467,76 @@ fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Ve
                 ));
             }
         }
+        RuleKind::UnusedLocalVariable => {
+            let exceptions = property_list(rule, "exceptions");
+            for local in &model.usage.locals {
+                if is_rust_unused_name(&local.name) {
+                    continue;
+                }
+                if exceptions.iter().any(|e| e == &local.name) {
+                    continue;
+                }
+                if model.usage.ident_reads.contains(&local.name) {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    local.begin_line,
+                    format_message(&rule.message, &[&local.name]),
+                ));
+            }
+        }
+        RuleKind::UnusedFormalParameter => {
+            for param in &model.usage.params {
+                if is_rust_unused_name(&param.name) {
+                    continue;
+                }
+                if model.usage.ident_reads.contains(&param.name) {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    param.begin_line,
+                    format_message(&rule.message, &[&param.name]),
+                ));
+            }
+        }
+        RuleKind::UnusedPrivateField => {
+            for field in &model.usage.private_fields {
+                if is_rust_unused_name(&field.name) {
+                    continue;
+                }
+                if model.usage.field_reads.contains(&field.name) {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    field.begin_line,
+                    format_message(&rule.message, &[&field.name]),
+                ));
+            }
+        }
+        RuleKind::UnusedPrivateMethod => {
+            for method in &model.usage.private_methods {
+                if is_rust_unused_name(&method.name) {
+                    continue;
+                }
+                if model.usage.method_calls.contains(&method.name)
+                    || model.usage.ident_reads.contains(&method.name)
+                {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    method.begin_line,
+                    format_message(&rule.message, &[&method.name]),
+                ));
+            }
+        }
     }
 }
 
@@ -673,6 +747,14 @@ fn is_public(vis: &Visibility) -> bool {
     matches!(vis, Visibility::Public(_))
 }
 
+fn is_private(vis: &Visibility) -> bool {
+    matches!(vis, Visibility::Inherited)
+}
+
+fn is_rust_unused_name(name: &str) -> bool {
+    name == "_" || name.starts_with('_')
+}
+
 fn count_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>) -> usize {
     inputs
         .iter()
@@ -768,6 +850,23 @@ struct FileModel<'a> {
     types: Vec<TypeModel<'a>>,
     variables: Vec<NamedBinding>,
     constants: Vec<NamedBinding>,
+    usage: UseDefModel,
+}
+
+struct UseDefModel {
+    locals: Vec<NamedSite>,
+    params: Vec<NamedSite>,
+    private_fields: Vec<NamedSite>,
+    private_methods: Vec<NamedSite>,
+    ident_reads: HashSet<String>,
+    field_reads: HashSet<String>,
+    method_calls: HashSet<String>,
+}
+
+#[derive(Clone, Debug)]
+struct NamedSite {
+    name: String,
+    begin_line: usize,
 }
 
 impl<'a> FileModel<'a> {
@@ -783,6 +882,9 @@ impl<'a> FileModel<'a> {
         };
         binder.visit_file(file);
 
+        let mut usage = UseDefCollector::new();
+        usage.visit_file(file);
+
         let mut types: Vec<_> = types.into_values().collect();
         types.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
         functions.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
@@ -792,8 +894,280 @@ impl<'a> FileModel<'a> {
             types,
             variables: binder.variables,
             constants: binder.constants,
+            usage: usage.into_model(),
         }
     }
+}
+
+struct UseDefCollector {
+    locals: Vec<NamedSite>,
+    params: Vec<NamedSite>,
+    private_fields: Vec<NamedSite>,
+    private_methods: Vec<NamedSite>,
+    ident_reads: HashSet<String>,
+    field_reads: HashSet<String>,
+    method_calls: HashSet<String>,
+    binding_mode: BindingMode,
+    assign_lhs: bool,
+    in_trait_impl: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BindingMode {
+    None,
+    Local,
+    Param,
+}
+
+impl UseDefCollector {
+    fn new() -> Self {
+        Self {
+            locals: Vec::new(),
+            params: Vec::new(),
+            private_fields: Vec::new(),
+            private_methods: Vec::new(),
+            ident_reads: HashSet::new(),
+            field_reads: HashSet::new(),
+            method_calls: HashSet::new(),
+            binding_mode: BindingMode::None,
+            assign_lhs: false,
+            in_trait_impl: false,
+        }
+    }
+
+    fn into_model(self) -> UseDefModel {
+        UseDefModel {
+            locals: self.locals,
+            params: self.params,
+            private_fields: self.private_fields,
+            private_methods: self.private_methods,
+            ident_reads: self.ident_reads,
+            field_reads: self.field_reads,
+            method_calls: self.method_calls,
+        }
+    }
+
+    fn with_binding_mode<F>(&mut self, mode: BindingMode, f: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        let prev = self.binding_mode;
+        self.binding_mode = mode;
+        f(self);
+        self.binding_mode = prev;
+    }
+
+    fn record_params_from_sig(&mut self, sig: &syn::Signature) {
+        for input in &sig.inputs {
+            if let FnArg::Typed(pt) = input {
+                self.with_binding_mode(BindingMode::Param, |this| this.visit_pat(&pt.pat));
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for UseDefCollector {
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&node.pat));
+        if let Some(init) = &node.init {
+            self.visit_expr(&init.expr);
+            if let Some((_, diverge)) = &init.diverge {
+                self.visit_expr(diverge);
+            }
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+        self.record_params_from_sig(&node.sig);
+        self.visit_block(&node.block);
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
+        let prev = self.in_trait_impl;
+        self.in_trait_impl = node.trait_.is_some();
+        syn::visit::visit_item_impl(self, node);
+        self.in_trait_impl = prev;
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if !self.in_trait_impl && is_private(&node.vis) {
+            self.private_methods.push(NamedSite {
+                name: node.sig.ident.to_string(),
+                begin_line: node.sig.fn_token.span().start().line,
+            });
+        }
+        self.record_params_from_sig(&node.sig);
+        self.visit_block(&node.block);
+    }
+
+    fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+        self.record_params_from_sig(&node.sig);
+        if let Some(body) = &node.default {
+            self.visit_block(body);
+        }
+    }
+
+    fn visit_field(&mut self, node: &'ast syn::Field) {
+        if let Some(ident) = &node.ident {
+            if is_private(&node.vis) {
+                self.private_fields.push(NamedSite {
+                    name: ident.to_string(),
+                    begin_line: ident.span().start().line,
+                });
+            }
+        }
+        syn::visit::visit_field(self, node);
+    }
+
+    fn visit_arm(&mut self, node: &'ast syn::Arm) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&node.pat));
+        if let Some((_, guard)) = &node.guard {
+            self.visit_expr(guard);
+        }
+        self.visit_expr(&node.body);
+    }
+
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&node.pat));
+        self.visit_expr(&node.expr);
+        self.visit_block(&node.body);
+    }
+
+    fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        if let syn::Expr::Let(l) = &*node.cond {
+            self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&l.pat));
+            self.visit_expr(&l.expr);
+        } else {
+            self.visit_expr(&node.cond);
+        }
+        self.visit_block(&node.body);
+    }
+
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        if let syn::Expr::Let(l) = &*node.cond {
+            self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&l.pat));
+            self.visit_expr(&l.expr);
+        } else {
+            self.visit_expr(&node.cond);
+        }
+        self.visit_block(&node.then_branch);
+        if let Some((_, else_branch)) = &node.else_branch {
+            self.visit_expr(else_branch);
+        }
+    }
+
+    fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
+        let name = node.ident.to_string();
+        if name != "self" {
+            let site = NamedSite {
+                name,
+                begin_line: node.ident.span().start().line,
+            };
+            match self.binding_mode {
+                BindingMode::Local => self.locals.push(site),
+                BindingMode::Param => self.params.push(site),
+                BindingMode::None => {}
+            }
+        }
+        if let Some((_, sub)) = &node.subpat {
+            self.visit_pat(sub);
+        }
+    }
+
+    fn visit_field_pat(&mut self, node: &'ast syn::FieldPat) {
+        if let Member::Named(ident) = &node.member {
+            self.field_reads.insert(ident.to_string());
+        }
+        self.visit_pat(&node.pat);
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        if !self.assign_lhs {
+            if let Some(ident) = path_single_ident(node) {
+                if ident != "self" && ident != "Self" {
+                    self.ident_reads.insert(ident);
+                }
+            } else if let Some(ident) = path_last_ident(node) {
+                self.method_calls.insert(ident);
+            }
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+
+    fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+        self.visit_expr(&node.base);
+        if !self.assign_lhs {
+            if let Member::Named(ident) = &node.member {
+                self.field_reads.insert(ident.to_string());
+            }
+        }
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        self.method_calls.insert(node.method.to_string());
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
+        self.assign_lhs = true;
+        self.visit_expr(&node.left);
+        self.assign_lhs = false;
+        self.visit_expr(&node.right);
+    }
+
+    fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
+        if matches!(
+            node.op,
+            syn::BinOp::AddAssign(_)
+                | syn::BinOp::SubAssign(_)
+                | syn::BinOp::MulAssign(_)
+                | syn::BinOp::DivAssign(_)
+                | syn::BinOp::RemAssign(_)
+                | syn::BinOp::BitXorAssign(_)
+                | syn::BinOp::BitAndAssign(_)
+                | syn::BinOp::BitOrAssign(_)
+                | syn::BinOp::ShlAssign(_)
+                | syn::BinOp::ShrAssign(_)
+        ) {
+            self.assign_lhs = true;
+            self.visit_expr(&node.left);
+            self.assign_lhs = false;
+            self.visit_expr(&node.right);
+        } else {
+            syn::visit::visit_expr_binary(self, node);
+        }
+    }
+}
+
+fn path_single_ident(path: &syn::ExprPath) -> Option<String> {
+    if path.qself.is_some() {
+        return None;
+    }
+    let mut segs = path.path.segments.iter();
+    let first = segs.next()?;
+    if segs.next().is_some() {
+        return None;
+    }
+    Some(first.ident.to_string())
+}
+
+fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
+    path.path.segments.last().map(|s| s.ident.to_string())
 }
 
 struct BindingCollector {
