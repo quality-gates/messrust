@@ -3,13 +3,15 @@
 mod analyze;
 mod discover;
 mod report;
+mod ruleset;
 
 use std::io::Write;
 use std::path::PathBuf;
 
-use analyze::{analyze_files, RuleId};
+use analyze::analyze_files;
 use discover::{discover, DiscoverOptions};
 use report::{exit_code_for, render_text, WriteTarget};
+use ruleset::{load_and_filter, LoadOptions};
 
 /// Process exit codes (PHPMD family).
 pub const EXIT_SUCCESS: i32 = 0;
@@ -23,6 +25,12 @@ struct Options {
     report_file: Option<PathBuf>,
     suffixes: Vec<String>,
     exclude: Vec<String>,
+    only: Option<Vec<String>>,
+    enable: Option<Vec<String>>,
+    disable: Vec<String>,
+    min_priority: u8,
+    max_priority: u8,
+    verbose: bool,
     ignore_tests: bool,
     ignore_errors: bool,
     ignore_violations: bool,
@@ -79,10 +87,15 @@ fn print_usage(w: &mut dyn Write) {
         w,
         "Usage: messrust <paths> <format> <ruleset[,ruleset...]> [options]\n\n\
          Options:\n\
+           --minimumpriority <n>            Only rules with priority <= n (1 highest)\n\
+           --maximumpriority <n>            Only rules with priority >= n\n\
            --reportfile <path>              Write report to file (stdout empty)\n\
            --suffixes <ext[,ext...]>        Replace default source suffixes\n\
            --exclude <substr[,substr...]>   Skip paths containing a substring\n\
+           --only, --enable <rules>         Keep only named loaded rules\n\
+           --disable <rules>                Remove named loaded rules\n\
            --ignore-tests                   Skip conventional Rust test files\n\
+           --verbose, -v                    Ruleset/load diagnostics\n\
            --ignore-errors-on-exit          Exit 0/2 even when errors exist\n\
            --ignore-violations-on-exit      Exit 0/1 even when findings exist\n\
            --version                        Print version\n\
@@ -98,6 +111,12 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
         report_file: None,
         suffixes: Vec::new(),
         exclude: Vec::new(),
+        only: None,
+        enable: None,
+        disable: Vec::new(),
+        min_priority: 0,
+        max_priority: 1,
+        verbose: false,
         ignore_tests: false,
         ignore_errors: false,
         ignore_violations: false,
@@ -110,24 +129,68 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
             match name {
                 "reportfile" => {
                     i += 1;
-                    let v = args.get(i).ok_or_else(|| "missing value for --reportfile".to_string())?;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --reportfile".to_string())?;
                     opt.report_file = Some(PathBuf::from(v));
                 }
                 "suffixes" => {
                     i += 1;
-                    let v = args.get(i).ok_or_else(|| "missing value for --suffixes".to_string())?;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --suffixes".to_string())?;
                     opt.suffixes = suffix_list(v);
                 }
                 "exclude" => {
                     i += 1;
-                    let v = args.get(i).ok_or_else(|| "missing value for --exclude".to_string())?;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --exclude".to_string())?;
                     opt.exclude = split_list(v);
                 }
+                "only" => {
+                    i += 1;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --only".to_string())?;
+                    opt.only = Some(split_list(v));
+                }
+                "enable" => {
+                    i += 1;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --enable".to_string())?;
+                    opt.enable = Some(split_list(v));
+                }
+                "disable" => {
+                    i += 1;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --disable".to_string())?;
+                    opt.disable = split_list(v);
+                }
+                "minimumpriority" => {
+                    i += 1;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --minimumpriority".to_string())?;
+                    opt.min_priority = parse_priority("--minimumpriority", v)?;
+                }
+                "maximumpriority" => {
+                    i += 1;
+                    let v = args
+                        .get(i)
+                        .ok_or_else(|| "missing value for --maximumpriority".to_string())?;
+                    opt.max_priority = parse_priority("--maximumpriority", v)?;
+                }
+                "verbose" => opt.verbose = true,
                 "ignore-tests" => opt.ignore_tests = true,
                 "ignore-errors-on-exit" => opt.ignore_errors = true,
                 "ignore-violations-on-exit" => opt.ignore_violations = true,
                 other => return Err(format!("unknown option: --{other}")),
             }
+        } else if a == "-v" {
+            opt.verbose = true;
         } else if a.starts_with('-') && a != "-" {
             return Err(format!("unknown option: {a}"));
         } else {
@@ -136,6 +199,16 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
         i += 1;
     }
     Ok((opt, positionals))
+}
+
+fn parse_priority(flag: &str, value: &str) -> Result<u8, String> {
+    let n: u8 = value
+        .parse()
+        .map_err(|_| format!("{flag} requires an integer"))?;
+    if !(1..=5).contains(&n) {
+        return Err(format!("{flag} must be between 1 and 5"));
+    }
+    Ok(n)
 }
 
 fn split_list(s: &str) -> Vec<String> {
@@ -165,7 +238,18 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         return EXIT_ERROR;
     }
 
-    let rules = match load_rules(&opt.rulesets) {
+    let only = opt.only.clone().or(opt.enable.clone()).unwrap_or_default();
+    let load_opts = LoadOptions {
+        min_priority: opt.min_priority,
+        max_priority: opt.max_priority,
+    };
+    let verbose = opt.verbose;
+    let mut warn = |msg: String| {
+        if verbose {
+            let _ = writeln!(stderr, "warning: {msg}");
+        }
+    };
+    let rules = match load_and_filter(&opt.rulesets, &only, &opt.disable, &load_opts, &mut warn) {
         Ok(r) => r,
         Err(e) => {
             let _ = writeln!(stderr, "error: {e}");
@@ -204,18 +288,4 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
     }
 
     exit_code_for(&report, opt.ignore_errors, opt.ignore_violations)
-}
-
-fn load_rules(rulesets: &[String]) -> Result<Vec<RuleId>, String> {
-    let mut rules = Vec::new();
-    for name in rulesets {
-        match name.as_str() {
-            "codesize" => rules.push(RuleId::ExcessiveParameterList),
-            other => return Err(format!("unknown ruleset: {other}")),
-        }
-    }
-    if rules.is_empty() {
-        return Err("no rulesets specified".to_string());
-    }
-    Ok(rules)
 }

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<ruleset name="Controversial Rules"
+         xmlns="http://pmd.sf.net/ruleset/1.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sf.net/ruleset/1.0.0 http://pmd.sf.net/ruleset_xml_schema.xsd"
+         xsi:noNamespaceSchemaLocation="http://pmd.sf.net/ruleset_xml_schema.xsd">
+
+    <description>
+This ruleset contains a collection of rules that enforce C# naming conventions.
+The rules are adapted from phpmd's Controversial ruleset: PHP's camelCase
+convention becomes PascalCase for classes/methods/properties and camelCase for
+parameters/locals, following .NET naming guidelines.
+    </description>
+
+    <rule name="CamelCaseClassName"
+          since="0.2"
+          message="The class {0} is not named in PascalCase."
+          class="PHPMD\Rule\Controversial\CamelCaseClassName"
+          externalInfoUrl="https://phpmd.org/rules/controversial.html#camelcaseclassname">
+        <description>
+            <![CDATA[
+It is considered best practice to use PascalCase notation to name classes,
+structs, records, and interfaces in C#.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties />
+        <example>
+            <![CDATA[
+class bad_name { }      // violation
+class GoodName { }      // OK
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="CamelCaseMethodName"
+          since="0.2"
+          message="The method {0} is not named in PascalCase."
+          class="PHPMD\Rule\Controversial\CamelCaseMethodName"
+          externalInfoUrl="https://phpmd.org/rules/controversial.html#camelcasemethodname">
+        <description>
+            <![CDATA[
+It is considered best practice to use PascalCase notation to name methods in C#.
+Constructors are excluded (their name is dictated by the class name).
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties />
+        <example>
+            <![CDATA[
+class ClassName
+{
+    public void get_name() { }   // violation
+    public void GetName() { }    // OK
+}
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="CamelCasePropertyName"
+          since="0.2"
+          message="The property {0} is not named in camelCase."
+          class="PHPMD\Rule\Controversial\CamelCasePropertyName"
+          externalInfoUrl="https://phpmd.org/rules/controversial.html#camelcasepropertyname">
+        <description>
+            <![CDATA[
+Public fields and auto-properties must be PascalCase. Private fields must be
+camelCase; a single leading underscore is allowed (allowUnderscorePrefix=true
+by default) to follow the common _camelCase convention.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="allowUnderscorePrefix"
+                      description="Allow a single leading underscore for private fields (_camelCase)."
+                      value="true" />
+        </properties>
+        <example>
+            <![CDATA[
+class ClassName
+{
+    private int bad_field;    // violation
+    private int _goodField;   // OK (allowUnderscorePrefix=true)
+    public int GoodProp { get; set; }  // OK
+}
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="CamelCaseParameterName"
+          since="0.2"
+          message="The parameter {0} is not named in camelCase."
+          class="PHPMD\Rule\Controversial\CamelCaseParameterName"
+          externalInfoUrl="https://phpmd.org/rules/controversial.html#camelcaseparametername">
+        <description>
+            <![CDATA[
+It is considered best practice to use camelCase notation to name parameters in C#.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties />
+        <example>
+            <![CDATA[
+class ClassName
+{
+    public void DoSomething(string user_name) { }   // violation
+    public void DoSomething(string userName) { }    // OK
+}
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="CamelCaseVariableName"
+          since="0.2"
+          message="The variable {0} is not named in camelCase."
+          class="PHPMD\Rule\Controversial\CamelCaseVariableName"
+          externalInfoUrl="https://phpmd.org/rules/controversial.html#camelcasevariablename">
+        <description>
+            <![CDATA[
+It is considered best practice to use camelCase notation to name local variables
+in C#. A leading underscore is permitted (allowUnderscorePrefix=true by default).
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="allowUnderscorePrefix"
+                      description="Allow a single leading underscore for local variables (_camelCase)."
+                      value="true" />
+        </properties>
+        <example>
+            <![CDATA[
+class ClassName
+{
+    public void DoSomething()
+    {
+        var data_module = new DataModule();   // violation
+        var dataModule = new DataModule();    // OK
+    }
+}
+            ]]>
+        </example>
+    </rule>
+
+</ruleset>

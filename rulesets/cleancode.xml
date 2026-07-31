@@ -1,0 +1,155 @@
+<?xml version="1.0"?>
+
+<ruleset name="Clean Code Rules"
+         xmlns="http://pmd.sf.net/ruleset/1.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sf.net/ruleset/1.0.0 http://pmd.sf.net/ruleset_xml_schema.xsd"
+         xsi:noNamespaceSchemaLocation="http://pmd.sf.net/ruleset_xml_schema.xsd">
+
+    <description>
+The Clean Code ruleset contains rules that enforce a clean code base. This includes rules from SOLID and object calisthenics.
+    </description>
+
+    <rule name="BooleanArgumentFlag"
+          since="1.4.0"
+          message="The method {0} has a boolean flag argument {1}, which is a certain sign of a Single Responsibility Principle violation."
+          class="PHPMD\Rule\CleanCode\BooleanArgumentFlag"
+          externalInfoUrl="https://phpmd.org/rules/cleancode.html#booleanargumentflag">
+        <description>
+            <![CDATA[
+A boolean flag argument is a reliable indicator for a violation of
+the Single Responsibility Principle (SRP). You can fix this problem
+by extracting the logic in the boolean flag into its own class
+or method.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="exceptions" description="Comma-separated class name list of exceptions" value=""/>
+            <property name="ignorepattern" description="Ignore methods matching this regex. Example: /^(__construct|get.*Filtered)$/" value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+public class Foo {
+    public void Bar(bool flag) {
+        // flag signals two responsibilities
+    }
+}
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="ElseExpression"
+          since="1.4.0"
+          message="The method {0} uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them."
+          class="PHPMD\Rule\CleanCode\ElseExpression"
+          externalInfoUrl="https://phpmd.org/rules/cleancode.html#elseexpression">
+        <description>
+            <![CDATA[
+An if expression with an else branch is basically not necessary. You can rewrite the
+conditions in a way that the else clause is not necessary and the code becomes simpler
+to read. To achieve this, use early return statements, though you may need to split
+the code into several smaller methods. For very simple assignments you could also use
+the ternary operator.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties/>
+        <example>
+            <![CDATA[
+public class Foo {
+    public void Bar(bool flag) {
+        if (flag) {
+            // one branch
+        } else {
+            // another branch
+        }
+    }
+}
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="IfStatementAssignment"
+          since="2.7.0"
+          message="Avoid assigning values to variables in if clauses and the like (line '{0}', column '{1}')."
+          class="PHPMD\Rule\CleanCode\IfStatementAssignment"
+          externalInfoUrl="http://phpmd.org/rules/cleancode.html#ifstatementassignment">
+        <description>
+            <![CDATA[
+Assignments in if clauses and while conditions are considered a code smell.
+In C#, such assignments must be wrapped in extra parentheses (e.g.
+`if ((x = Foo()) != null)`), which can lead to many difficult-to-spot bugs,
+especially when the right operand could result in zero, null, or an empty string.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties/>
+        <example>
+            <![CDATA[
+public class Foo {
+    public void Bar(string input) {
+        string result;
+        if ((result = Process(input)) != null) { // assignment in condition
+            Use(result);
+        }
+    }
+}
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="DuplicatedArrayKey"
+          message="Duplicated array key {0}, first declared at line {1}."
+          class="PHPMD\Rule\CleanCode\DuplicatedArrayKey"
+          externalInfoUrl="http://phpmd.org/rules/cleancode.html#duplicatedarraykey">
+        <description>
+            <![CDATA[
+Defining another value for the same key in a dictionary or collection initializer
+overrides the previous key/value, making the earlier definition effectively dead code.
+If the key will always have a different value, there is usually no point defining
+it twice.
+            ]]>
+        </description>
+        <priority>2</priority>
+        <properties/>
+        <example>
+            <![CDATA[
+var d = new Dictionary<string, int> {
+    ["foo"] = 1,
+    ["foo"] = 2,  // duplicate key, first declaration is dead
+};
+            ]]>
+        </example>
+    </rule>
+
+    <rule name="StaticAccess"
+          since="1.4.0"
+          message="Avoid using static access to class '{0}' in method '{1}'."
+          class="PHPMD\Rule\CleanCode\StaticAccess"
+          externalInfoUrl="https://phpmd.org/rules/cleancode.html#staticaccess">
+        <description>
+            <![CDATA[
+Static access causes unexchangeable dependencies to other classes and leads to hard-to-test code.
+Avoid using static access at all costs and instead inject dependencies through the constructor.
+The only case when static access is acceptable is when used for factory methods.
+Add commonly-used utility classes (e.g. Math, Convert, string) to the exceptions list.
+            ]]>
+        </description>
+        <priority>1</priority>
+        <properties>
+            <property name="exceptions" description="Comma-separated class name list of exceptions (e.g. Math,Convert,string)" value=""/>
+            <property name="ignorepattern" description="Ignore methods matching this regex. Example: /^create/i" value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+public class Foo {
+    public void Bar() {
+        Baz.DoSomething(); // static access to another class
+    }
+}
+            ]]>
+        </example>
+    </rule>
+
+</ruleset>
