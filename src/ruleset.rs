@@ -238,6 +238,10 @@ fn resolve_kind(class: &str) -> Option<RuleKind> {
             Some(RuleKind::ConstantNamingConventions)
         }
         "PHPMD\\Rule\\Naming\\BooleanGetMethodName" => Some(RuleKind::BooleanGetMethodName),
+        "PHPMD\\Rule\\UnusedPrivateField" => Some(RuleKind::UnusedPrivateField),
+        "PHPMD\\Rule\\UnusedLocalVariable" => Some(RuleKind::UnusedLocalVariable),
+        "PHPMD\\Rule\\UnusedPrivateMethod" => Some(RuleKind::UnusedPrivateMethod),
+        "PHPMD\\Rule\\UnusedFormalParameter" => Some(RuleKind::UnusedFormalParameter),
         _ => None,
     }
 }
