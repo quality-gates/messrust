@@ -11,14 +11,16 @@ quality-gates mess detectors.
 
 ## Status
 
-CLI, report formats, ruleset loading, and the full `codesize`, `naming`, and
-`unusedcode` rule catalogs are in place. Other component rulesets still load as
-stubs until later tickets.
+CLI, report formats, ruleset loading, and the full `codesize`, `naming`,
+`unusedcode`, and `cleancode` rule catalogs are in place. Other component
+rulesets still load as stubs until later tickets.
 
 Complexity metrics follow the quality-gates phpmd 2.15.0 pins; see
 [docs/codesize-metrics.md](docs/codesize-metrics.md). Naming adaptations
 (including the `ConstructorWithNameAsEnclosingClass` no-op) are in
 [docs/naming-adaptations.md](docs/naming-adaptations.md). Unused-code
 adaptations (single-file syntax analysis) are in
-[docs/unusedcode-adaptations.md](docs/unusedcode-adaptations.md).
+[docs/unusedcode-adaptations.md](docs/unusedcode-adaptations.md). Cleancode
+adaptations (and PHP-only no-ops) are in
+[docs/cleancode-adaptations.md](docs/cleancode-adaptations.md).
 

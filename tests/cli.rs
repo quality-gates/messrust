@@ -578,7 +578,8 @@ fn verbose_prints_ruleset_load_diagnostics() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
     for flag in ["--verbose", "-v"] {
-        let (code, _out, err) = run_cli(&[path.to_str().unwrap(), "text", "cleancode", flag]);
+        // design still has stub rule bodies until later tickets.
+        let (code, _out, err) = run_cli(&[path.to_str().unwrap(), "text", "design", flag]);
         assert_eq!(code, EXIT_SUCCESS, "flag={flag} stderr={err:?}");
         assert!(
             err.contains("warning: Skipping unimplemented rule"),
