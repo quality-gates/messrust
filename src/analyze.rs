@@ -1,4 +1,5 @@
-//! Syntax-only analysis for codesize, naming, unusedcode, cleancode, and design rules.
+//! Syntax-only analysis for codesize, naming, unusedcode, cleancode, design,
+//! and controversial rules.
 
 use std::collections::{HashMap, HashSet};
 
@@ -50,6 +51,11 @@ pub enum RuleKind {
     CouplingBetweenObjects,
     GlobalVariable,
     LackOfCohesionOfMethods,
+    CamelCaseClassName,
+    CamelCaseMethodName,
+    CamelCasePropertyName,
+    CamelCaseParameterName,
+    CamelCaseVariableName,
 }
 
 const DEFAULT_CCN: usize = 10;
@@ -786,6 +792,80 @@ fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Ve
                 }
             }
         }
+        RuleKind::CamelCaseClassName => {
+            let strict_abbr = property_bool(rule, "camelcase-abbreviations", false);
+            for t in &model.types {
+                let ok = if strict_abbr {
+                    is_pascal_case_no_abbrev(&t.name)
+                } else {
+                    is_pascal_case(&t.name)
+                };
+                if ok {
+                    continue;
+                }
+                out.push(type_violation(
+                    rule,
+                    file,
+                    t,
+                    format_message(&rule.message, &[&t.name]),
+                ));
+            }
+        }
+        RuleKind::CamelCaseMethodName => {
+            for f in &model.functions {
+                if f.name == "_" || is_snake_case(&f.name) {
+                    continue;
+                }
+                out.push(func_violation(
+                    rule,
+                    file,
+                    f,
+                    format_message(&rule.message, &[&f.name]),
+                ));
+            }
+        }
+        RuleKind::CamelCasePropertyName => {
+            for t in &model.types {
+                for field in &t.fields {
+                    if is_tuple_field_name(&field.name) || field.name == "_" || is_snake_case(&field.name)
+                    {
+                        continue;
+                    }
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        field.begin_line,
+                        format_message(&rule.message, &[&field.name]),
+                    ));
+                }
+            }
+        }
+        RuleKind::CamelCaseParameterName => {
+            for p in &model.usage.params {
+                if p.name == "_" || is_snake_case(&p.name) {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    p.begin_line,
+                    format_message(&rule.message, &[&p.name]),
+                ));
+            }
+        }
+        RuleKind::CamelCaseVariableName => {
+            for v in &model.usage.locals {
+                if v.name == "_" || is_snake_case(&v.name) {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    v.begin_line,
+                    format_message(&rule.message, &[&v.name]),
+                ));
+            }
+        }
     }
 }
 
@@ -939,6 +1019,39 @@ fn is_pascal_case(name: &str) -> bool {
         Some(c) if c.is_uppercase() => !name.contains('_'),
         _ => false,
     }
+}
+
+fn is_pascal_case_no_abbrev(name: &str) -> bool {
+    if !is_pascal_case(name) {
+        return false;
+    }
+    let chars: Vec<char> = name.chars().collect();
+    !chars.windows(2).any(|w| w[0].is_uppercase() && w[1].is_uppercase())
+}
+
+fn is_snake_case(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut saw_letter = false;
+    for c in name.chars() {
+        if c == '_' {
+            continue;
+        }
+        if c.is_ascii_lowercase() {
+            saw_letter = true;
+            continue;
+        }
+        if c.is_ascii_digit() {
+            continue;
+        }
+        return false;
+    }
+    saw_letter
+}
+
+fn is_tuple_field_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_digit())
 }
 
 fn is_upper_case(name: &str) -> bool {
@@ -1378,6 +1491,7 @@ struct MethodRef<'a> {
 #[derive(Clone)]
 struct FieldInfo {
     name: String,
+    begin_line: usize,
     type_names: Vec<String>,
 }
 
@@ -1885,9 +1999,10 @@ fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
             .named
             .iter()
             .filter_map(|f| {
-                let name = f.ident.as_ref()?.to_string();
+                let ident = f.ident.as_ref()?;
                 Some(FieldInfo {
-                    name,
+                    name: ident.to_string(),
+                    begin_line: ident.span().start().line,
                     type_names: type_names_in(&f.ty),
                 })
             })
@@ -1898,6 +2013,7 @@ fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
             .enumerate()
             .map(|(i, f)| FieldInfo {
                 name: i.to_string(),
+                begin_line: f.ty.span().start().line,
                 type_names: type_names_in(&f.ty),
             })
             .collect(),
@@ -1946,9 +2062,10 @@ fn insert_union<'a>(types: &mut HashMap<String, TypeModel<'a>>, u: &'a ItemUnion
         .named
         .iter()
         .filter_map(|f| {
-            let name = f.ident.as_ref()?.to_string();
+            let ident = f.ident.as_ref()?;
             Some(FieldInfo {
-                name,
+                name: ident.to_string(),
+                begin_line: ident.span().start().line,
                 type_names: type_names_in(&f.ty),
             })
         })
