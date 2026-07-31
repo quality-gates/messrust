@@ -1,0 +1,22 @@
+[package]
+name = "messrust"
+version = "0.1.0"
+edition = "2021"
+description = "A PHPMD-style mess detector for Rust source code"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/quality-gates/messrust"
+keywords = ["phpmd", "lint", "static-analysis", "rust"]
+categories = ["development-tools", "command-line-utilities"]
+
+[[bin]]
+name = "messrust"
+path = "src/main.rs"
+
+[dependencies]
+syn = { version = "2", features = ["full", "parsing", "visit"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
