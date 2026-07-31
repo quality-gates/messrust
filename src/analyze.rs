@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use regex::Regex;
 use syn::spanned::Spanned;
+use syn::visit::Visit;
 use syn::{
     Fields, FnArg, Item, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemTrait, ItemUnion, Pat, PatType,
-    Visibility,
+    ReturnType, Visibility,
 };
 
 use crate::metrics::{cyclomatic_complexity, effective_lines_of_code, npath_complexity};
@@ -25,6 +26,13 @@ pub enum RuleKind {
     TooManyMethods,
     TooManyPublicMethods,
     ExcessiveClassComplexity,
+    ShortClassName,
+    LongClassName,
+    ShortVariable,
+    LongVariable,
+    ShortMethodName,
+    ConstantNamingConventions,
+    BooleanGetMethodName,
 }
 
 const DEFAULT_CCN: usize = 10;
@@ -38,6 +46,9 @@ const DEFAULT_METHODS: usize = 25;
 const DEFAULT_PUBLIC_METHODS: usize = 10;
 const DEFAULT_WMC: usize = 50;
 const DEFAULT_IGNORE_PATTERN: &str = "(^(set|get|is|has|with))i";
+const DEFAULT_SHORT_NAME: usize = 3;
+const DEFAULT_LONG_CLASS: usize = 40;
+const DEFAULT_LONG_VAR: usize = 20;
 
 pub fn analyze_files(files: &[std::path::PathBuf], rules: &[LoadedRule]) -> Report {
     let mut report = Report::default();
@@ -309,6 +320,149 @@ fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Ve
                 }
             }
         }
+        RuleKind::ShortClassName => {
+            let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
+            let exceptions = property_list(rule, "exceptions");
+            for t in &model.types {
+                if t.name.chars().count() >= minimum {
+                    continue;
+                }
+                if exceptions.iter().any(|e| e == &t.name) {
+                    continue;
+                }
+                out.push(type_violation(
+                    rule,
+                    file,
+                    t,
+                    format_message(&rule.message, &[&t.name, &minimum.to_string()]),
+                ));
+            }
+        }
+        RuleKind::LongClassName => {
+            let maximum = property_usize(rule, "maximum", DEFAULT_LONG_CLASS);
+            let prefixes = property_list(rule, "subtract-prefixes");
+            let suffixes = property_list(rule, "subtract-suffixes");
+            for t in &model.types {
+                let effective = length_without(&t.name, &prefixes, &suffixes);
+                if effective <= maximum {
+                    continue;
+                }
+                out.push(type_violation(
+                    rule,
+                    file,
+                    t,
+                    format_message(&rule.message, &[&t.name, &maximum.to_string()]),
+                ));
+            }
+        }
+        RuleKind::ShortVariable => {
+            let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
+            let exceptions = property_list(rule, "exceptions");
+            for v in &model.variables {
+                if v.is_loop_binder {
+                    continue;
+                }
+                if v.name.chars().count() >= minimum {
+                    continue;
+                }
+                if exceptions.iter().any(|e| e == &v.name) {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    v.begin_line,
+                    format_message(&rule.message, &[&v.name, &minimum.to_string()]),
+                ));
+            }
+        }
+        RuleKind::LongVariable => {
+            let maximum = property_usize(rule, "maximum", DEFAULT_LONG_VAR);
+            let prefixes = property_list(rule, "subtract-prefixes");
+            let suffixes = property_list(rule, "subtract-suffixes");
+            for v in &model.variables {
+                if v.is_loop_binder {
+                    continue;
+                }
+                let effective = length_without(&v.name, &prefixes, &suffixes);
+                if effective <= maximum {
+                    continue;
+                }
+                out.push(name_violation(
+                    rule,
+                    file,
+                    v.begin_line,
+                    format_message(&rule.message, &[&v.name, &maximum.to_string()]),
+                ));
+            }
+        }
+        RuleKind::ShortMethodName => {
+            let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
+            let exceptions = property_list(rule, "exceptions");
+            for f in &model.functions {
+                if f.name.chars().count() >= minimum {
+                    continue;
+                }
+                if exceptions.iter().any(|e| e == &f.name) {
+                    continue;
+                }
+                let parent = f.parent.as_deref().unwrap_or("");
+                out.push(func_violation(
+                    rule,
+                    file,
+                    f,
+                    format_message(
+                        &rule.message,
+                        &[parent, &f.name, &minimum.to_string()],
+                    ),
+                ));
+            }
+        }
+        RuleKind::ConstantNamingConventions => {
+            let convention = rule
+                .properties
+                .get("convention")
+                .map(String::as_str)
+                .unwrap_or("upper");
+            let pascal = convention.eq_ignore_ascii_case("pascal");
+            for c in &model.constants {
+                let ok = if pascal {
+                    is_pascal_case(&c.name)
+                } else {
+                    is_upper_case(&c.name)
+                };
+                if ok {
+                    continue;
+                }
+                let description = if pascal {
+                    format_message(
+                        "Constant {0} should be defined in PascalCase",
+                        &[&c.name],
+                    )
+                } else {
+                    format_message(&rule.message, &[&c.name])
+                };
+                out.push(name_violation(rule, file, c.begin_line, description));
+            }
+        }
+        RuleKind::BooleanGetMethodName => {
+            let check_parameterized =
+                property_bool(rule, "checkParameterizedMethods", false);
+            for f in &model.functions {
+                if !is_getter_name(&f.name) || !f.returns_bool {
+                    continue;
+                }
+                if !check_parameterized && f.param_count > 0 {
+                    continue;
+                }
+                out.push(func_violation(
+                    rule,
+                    file,
+                    f,
+                    format_message(&rule.message, &[&f.name]),
+                ));
+            }
+        }
     }
 }
 
@@ -381,6 +535,29 @@ fn type_violation(
     }
 }
 
+fn name_violation(
+    rule: &LoadedRule,
+    file: &str,
+    begin_line: usize,
+    description: String,
+) -> Violation {
+    Violation {
+        file: file.to_string(),
+        begin_line,
+        end_line: begin_line,
+        rule_name: rule.name.clone(),
+        ruleset_name: rule.ruleset_name.clone(),
+        description,
+        priority: rule.priority,
+        package: String::new(),
+        function: String::new(),
+        class: String::new(),
+        method: String::new(),
+        external_info_url: String::new(),
+        suppressed: false,
+    }
+}
+
 fn format_message(template: &str, args: &[&str]) -> String {
     let mut out = template.to_string();
     for (i, arg) in args.iter().enumerate() {
@@ -401,6 +578,67 @@ fn property_bool(rule: &LoadedRule, key: &str, default: bool) -> bool {
         .get(key)
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes"))
         .unwrap_or(default)
+}
+
+fn property_list(rule: &LoadedRule, key: &str) -> Vec<String> {
+    rule.properties
+        .get(key)
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn length_without(name: &str, prefixes: &[String], suffixes: &[String]) -> usize {
+    let mut effective = name;
+    for p in prefixes {
+        if !p.is_empty() && effective.starts_with(p.as_str()) {
+            effective = &effective[p.len()..];
+            break;
+        }
+    }
+    for s in suffixes {
+        if !s.is_empty() && effective.ends_with(s.as_str()) {
+            effective = &effective[..effective.len() - s.len()];
+            break;
+        }
+    }
+    effective.chars().count()
+}
+
+fn is_pascal_case(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_uppercase() => !name.contains('_'),
+        _ => false,
+    }
+}
+
+fn is_upper_case(name: &str) -> bool {
+    let mut saw_letter = false;
+    for c in name.chars() {
+        if c == '_' {
+            continue;
+        }
+        if !c.is_ascii_uppercase() && !c.is_ascii_digit() {
+            return false;
+        }
+        if c.is_ascii_uppercase() {
+            saw_letter = true;
+        }
+    }
+    saw_letter
+}
+
+fn is_getter_name(name: &str) -> bool {
+    name.len() >= 3
+        && name.as_bytes()[0].eq_ignore_ascii_case(&b'g')
+        && name.as_bytes()[1].eq_ignore_ascii_case(&b'e')
+        && name.as_bytes()[2].eq_ignore_ascii_case(&b't')
 }
 
 fn compile_phpmd_regex(pat: &str) -> Option<Regex> {
@@ -473,6 +711,19 @@ fn type_name_from_path(ty: &syn::Type) -> String {
     }
 }
 
+fn returns_bool(output: &ReturnType) -> bool {
+    match output {
+        ReturnType::Type(_, ty) => type_name_from_path(ty) == "bool",
+        ReturnType::Default => false,
+    }
+}
+
+struct NamedBinding {
+    name: String,
+    begin_line: usize,
+    is_loop_binder: bool,
+}
+
 struct FnModel<'a> {
     name: String,
     parent: Option<String>,
@@ -480,6 +731,7 @@ struct FnModel<'a> {
     end_line: usize,
     param_count: usize,
     body: Option<&'a syn::Block>,
+    returns_bool: bool,
 }
 
 impl FnModel<'_> {
@@ -514,6 +766,8 @@ struct FileModel<'a> {
     src: &'a str,
     functions: Vec<FnModel<'a>>,
     types: Vec<TypeModel<'a>>,
+    variables: Vec<NamedBinding>,
+    constants: Vec<NamedBinding>,
 }
 
 impl<'a> FileModel<'a> {
@@ -522,6 +776,13 @@ impl<'a> FileModel<'a> {
         let mut functions = Vec::new();
         collect_items(&file.items, &mut types, &mut functions);
 
+        let mut binder = BindingCollector {
+            variables: Vec::new(),
+            constants: Vec::new(),
+            loop_pat_depth: 0,
+        };
+        binder.visit_file(file);
+
         let mut types: Vec<_> = types.into_values().collect();
         types.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
         functions.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
@@ -529,7 +790,101 @@ impl<'a> FileModel<'a> {
             src,
             functions,
             types,
+            variables: binder.variables,
+            constants: binder.constants,
         }
+    }
+}
+
+struct BindingCollector {
+    variables: Vec<NamedBinding>,
+    constants: Vec<NamedBinding>,
+    loop_pat_depth: usize,
+}
+
+impl<'ast> Visit<'ast> for BindingCollector {
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        self.loop_pat_depth += 1;
+        self.visit_pat(&node.pat);
+        self.loop_pat_depth -= 1;
+        self.visit_expr(&node.expr);
+        self.visit_block(&node.body);
+    }
+
+    fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
+        for attr in &node.attrs {
+            self.visit_attribute(attr);
+        }
+        if let syn::Expr::Let(l) = &*node.cond {
+            self.loop_pat_depth += 1;
+            self.visit_pat(&l.pat);
+            self.loop_pat_depth -= 1;
+            self.visit_expr(&l.expr);
+        } else {
+            self.visit_expr(&node.cond);
+        }
+        self.visit_block(&node.body);
+    }
+
+    fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
+        if node.ident != "self" {
+            self.variables.push(NamedBinding {
+                name: node.ident.to_string(),
+                begin_line: node.ident.span().start().line,
+                is_loop_binder: self.loop_pat_depth > 0,
+            });
+        }
+        syn::visit::visit_pat_ident(self, node);
+    }
+
+    fn visit_field(&mut self, node: &'ast syn::Field) {
+        if let Some(ident) = &node.ident {
+            self.variables.push(NamedBinding {
+                name: ident.to_string(),
+                begin_line: ident.span().start().line,
+                is_loop_binder: false,
+            });
+        }
+        syn::visit::visit_field(self, node);
+    }
+
+    fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
+        self.constants.push(NamedBinding {
+            name: node.ident.to_string(),
+            begin_line: node.ident.span().start().line,
+            is_loop_binder: false,
+        });
+        syn::visit::visit_item_const(self, node);
+    }
+
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        self.constants.push(NamedBinding {
+            name: node.ident.to_string(),
+            begin_line: node.ident.span().start().line,
+            is_loop_binder: false,
+        });
+        syn::visit::visit_item_static(self, node);
+    }
+
+    fn visit_impl_item_const(&mut self, node: &'ast syn::ImplItemConst) {
+        self.constants.push(NamedBinding {
+            name: node.ident.to_string(),
+            begin_line: node.ident.span().start().line,
+            is_loop_binder: false,
+        });
+        syn::visit::visit_impl_item_const(self, node);
+    }
+
+    fn visit_trait_item_const(&mut self, node: &'ast syn::TraitItemConst) {
+        self.constants.push(NamedBinding {
+            name: node.ident.to_string(),
+            begin_line: node.ident.span().start().line,
+            is_loop_binder: false,
+        });
+        syn::visit::visit_trait_item_const(self, node);
     }
 }
 
@@ -651,6 +1006,7 @@ fn insert_trait<'a>(
                 end_line: end,
                 param_count: count_params(&m.sig.inputs),
                 body,
+                returns_bool: returns_bool(&m.sig.output),
             });
         }
     }
@@ -684,6 +1040,7 @@ fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
         end_line: f.span().end().line,
         param_count: count_params(&f.sig.inputs),
         body: Some(&f.block),
+        returns_bool: returns_bool(&f.sig.output),
     }
 }
 
@@ -726,6 +1083,7 @@ fn attach_impl<'a>(
                 end_line: end,
                 param_count: count_params(&m.sig.inputs),
                 body: Some(&m.block),
+                returns_bool: returns_bool(&m.sig.output),
             });
         }
     }

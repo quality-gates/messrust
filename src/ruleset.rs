@@ -229,6 +229,15 @@ fn resolve_kind(class: &str) -> Option<RuleKind> {
         "PHPMD\\Rule\\Design\\TooManyMethods" => Some(RuleKind::TooManyMethods),
         "PHPMD\\Rule\\Design\\TooManyPublicMethods" => Some(RuleKind::TooManyPublicMethods),
         "PHPMD\\Rule\\Design\\WeightedMethodCount" => Some(RuleKind::ExcessiveClassComplexity),
+        "PHPMD\\Rule\\Naming\\ShortClassName" => Some(RuleKind::ShortClassName),
+        "PHPMD\\Rule\\Naming\\LongClassName" => Some(RuleKind::LongClassName),
+        "PHPMD\\Rule\\Naming\\ShortVariable" => Some(RuleKind::ShortVariable),
+        "PHPMD\\Rule\\Naming\\LongVariable" => Some(RuleKind::LongVariable),
+        "PHPMD\\Rule\\Naming\\ShortMethodName" => Some(RuleKind::ShortMethodName),
+        "PHPMD\\Rule\\Naming\\ConstantNamingConventions" => {
+            Some(RuleKind::ConstantNamingConventions)
+        }
+        "PHPMD\\Rule\\Naming\\BooleanGetMethodName" => Some(RuleKind::BooleanGetMethodName),
         _ => None,
     }
 }
