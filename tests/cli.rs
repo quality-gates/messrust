@@ -578,8 +578,25 @@ fn verbose_prints_ruleset_load_diagnostics() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
     for flag in ["--verbose", "-v"] {
-        // controversial still has stub rule bodies until later tickets.
-        let (code, _out, err) = run_cli(&[path.to_str().unwrap(), "text", "controversial", flag]);
+        // Unknown class in a custom XML ruleset still yields a skip warning.
+        let stub = dir.path().join("stub.xml");
+        fs::write(
+            &stub,
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Stub">
+  <rule name="NotImplementedYet"
+         message="unused"
+         class="PHPMD\Rule\DoesNotExist"/>
+</ruleset>
+"#,
+        )
+        .unwrap();
+        let (code, _out, err) = run_cli(&[
+            path.to_str().unwrap(),
+            "text",
+            stub.to_str().unwrap(),
+            flag,
+        ]);
         assert_eq!(code, EXIT_SUCCESS, "flag={flag} stderr={err:?}");
         assert!(
             err.contains("warning: Skipping unimplemented rule"),

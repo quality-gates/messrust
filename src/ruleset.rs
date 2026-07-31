@@ -255,6 +255,17 @@ fn resolve_kind(class: &str) -> Option<RuleKind> {
         "PHPMD\\Rule\\Design\\CouplingBetweenObjects" => Some(RuleKind::CouplingBetweenObjects),
         "PHPMD\\Rule\\Design\\GlobalVariable" => Some(RuleKind::GlobalVariable),
         "PHPMD\\Rule\\Design\\LackOfCohesionOfMethods" => Some(RuleKind::LackOfCohesionOfMethods),
+        "PHPMD\\Rule\\Controversial\\CamelCaseClassName" => Some(RuleKind::CamelCaseClassName),
+        "PHPMD\\Rule\\Controversial\\CamelCaseMethodName" => Some(RuleKind::CamelCaseMethodName),
+        "PHPMD\\Rule\\Controversial\\CamelCasePropertyName" => {
+            Some(RuleKind::CamelCasePropertyName)
+        }
+        "PHPMD\\Rule\\Controversial\\CamelCaseParameterName" => {
+            Some(RuleKind::CamelCaseParameterName)
+        }
+        "PHPMD\\Rule\\Controversial\\CamelCaseVariableName" => {
+            Some(RuleKind::CamelCaseVariableName)
+        }
         _ => None,
     }
 }
