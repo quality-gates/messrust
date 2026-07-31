@@ -10,8 +10,8 @@ use crate::analyze::RuleKind;
 #[derive(Clone, Debug)]
 pub struct LoadedRule {
     pub name: String,
-    /// Priority 1 (highest) through 5. Kept for later report formats.
-    #[allow(dead_code)]
+    pub ruleset_name: String,
+    /// Priority 1 (highest) through 5.
     pub priority: u8,
     pub properties: BTreeMap<String, String>,
     pub kind: RuleKind,
@@ -175,7 +175,7 @@ fn add_ref(
 }
 
 fn build_rule(
-    _set_name: &str,
+    set_name: &str,
     def: &XmlRule,
     ov: &XmlRule,
     opts: &LoadOptions,
@@ -201,6 +201,7 @@ fn build_rule(
     };
     Some(LoadedRule {
         name: def.name.clone(),
+        ruleset_name: set_name.to_string(),
         priority,
         properties,
         kind,

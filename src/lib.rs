@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use analyze::analyze_files;
 use discover::{discover, DiscoverOptions};
-use report::{exit_code_for, render_text, WriteTarget};
+use report::{exit_code_for, formats, is_known_format, render, WriteTarget};
 use ruleset::{load_and_filter, LoadOptions};
 
 /// Process exit codes (PHPMD family).
@@ -34,6 +34,7 @@ struct Options {
     ignore_tests: bool,
     ignore_errors: bool,
     ignore_violations: bool,
+    color: bool,
 }
 
 /// Injectable CLI entry. `args` are argv without the program name.
@@ -86,6 +87,7 @@ fn print_usage(w: &mut dyn Write) {
     let _ = writeln!(
         w,
         "Usage: messrust <paths> <format> <ruleset[,ruleset...]> [options]\n\n\
+         Formats: {}\n\n\
          Options:\n\
            --minimumpriority <n>            Only rules with priority <= n (1 highest)\n\
            --maximumpriority <n>            Only rules with priority >= n\n\
@@ -95,11 +97,13 @@ fn print_usage(w: &mut dyn Write) {
            --only, --enable <rules>         Keep only named loaded rules\n\
            --disable <rules>                Remove named loaded rules\n\
            --ignore-tests                   Skip conventional Rust test files\n\
+           --color                          Colorize text output\n\
            --verbose, -v                    Ruleset/load diagnostics\n\
            --ignore-errors-on-exit          Exit 0/2 even when errors exist\n\
            --ignore-violations-on-exit      Exit 0/1 even when findings exist\n\
            --version                        Print version\n\
-           --help, -h                       Print this help"
+           --help, -h                       Print this help",
+        formats().join(", ")
     );
 }
 
@@ -120,6 +124,7 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
         ignore_tests: false,
         ignore_errors: false,
         ignore_violations: false,
+        color: false,
     };
     let mut positionals = Vec::new();
     let mut i = 0;
@@ -187,6 +192,7 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
                 "ignore-tests" => opt.ignore_tests = true,
                 "ignore-errors-on-exit" => opt.ignore_errors = true,
                 "ignore-violations-on-exit" => opt.ignore_violations = true,
+                "color" => opt.color = true,
                 other => return Err(format!("unknown option: --{other}")),
             }
         } else if a == "-v" {
@@ -233,8 +239,13 @@ fn suffix_list(s: &str) -> Vec<String> {
 }
 
 fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    if opt.format != "text" {
-        let _ = writeln!(stderr, "error: unknown report format {}", opt.format);
+    if !is_known_format(&opt.format) {
+        let _ = writeln!(
+            stderr,
+            "error: unknown report format {}. Available: {}",
+            opt.format,
+            formats().join(", ")
+        );
         return EXIT_ERROR;
     }
 
@@ -282,7 +293,7 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         None => WriteTarget::Stdout,
     };
 
-    if let Err(e) = render_text(&report, target, stdout) {
+    if let Err(e) = render(&opt.format, &report, opt.color, target, stdout) {
         let _ = writeln!(stderr, "error: {e}");
         return EXIT_ERROR;
     }

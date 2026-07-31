@@ -269,6 +269,119 @@ fn unknown_format_exits_one() {
 }
 
 #[test]
+fn json_format_includes_family_fields_and_sorts_by_file_then_line() {
+    let dir = TempDir::new().unwrap();
+    // Two files; within z.rs two findings on different lines so begin-line order is visible.
+    write_file(
+        dir.path(),
+        "z.rs",
+        "fn late(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}\n\
+         fn early(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}\n",
+    );
+    // Write early/late in reverse declaration order relative to desired line sort:
+    // line 1 = late, line 2 = early → sorted output must keep line 1 before line 2.
+    write_file(dir.path(), "a.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "json", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(out.contains("\"package\": \"messrust\""), "stdout={out:?}");
+    assert!(out.contains("\"rule\": \"ExcessiveParameterList\""), "stdout={out:?}");
+    assert!(out.contains("\"priority\": 3"), "stdout={out:?}");
+    assert!(out.contains("\"beginLine\":"), "stdout={out:?}");
+    assert!(out.contains("\"function\": \"f\"") || out.contains("\"function\": \"late\""), "stdout={out:?}");
+    assert!(out.contains("\"suppressed\": false"), "stdout={out:?}");
+    let a = out.find("a.rs").expect("a.rs");
+    let z = out.find("z.rs").expect("z.rs");
+    assert!(a < z, "files not sorted: {out:?}");
+    // Within z.rs: beginLine 1 (late) must appear before beginLine 2 (early).
+    let z_slice = &out[z..];
+    let line1 = z_slice.find("\"beginLine\": 1").expect("beginLine 1");
+    let line2 = z_slice.find("\"beginLine\": 2").expect("beginLine 2");
+    assert!(line1 < line2, "lines not sorted within file: {z_slice:?}");
+}
+
+#[test]
+fn ansi_always_colors_rule_name_and_message() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "ansi", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(out.contains("\u{1b}[33m"), "missing yellow: {out:?}");
+    assert!(out.contains("\u{1b}[31m"), "missing red: {out:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn color_flag_colorizes_text_output() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize", "--color"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(out.contains("\u{1b}[33m"), "missing yellow: {out:?}");
+    assert!(out.contains("\u{1b}[31m"), "missing red: {out:?}");
+}
+
+#[test]
+fn text_without_color_has_no_ansi() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(!out.contains('\u{1b}'), "unexpected ansi: {out:?}");
+}
+
+#[test]
+fn all_family_formats_render_and_reportfile_works() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let cases: &[(&str, &[&str])] = &[
+        ("xml", &["<?xml", "tool=\"messrust\"", "rule=\"ExcessiveParameterList\"", "priority=\"3\""]),
+        ("html", &["<!DOCTYPE html>", "messrust report", "ExcessiveParameterList"]),
+        ("github", &["::warning file=", "ExcessiveParameterList"]),
+        ("gitlab", &["\"check_name\": \"ExcessiveParameterList\"", "\"severity\": \"major\""]),
+        ("checkstyle", &["<checkstyle", "ExcessiveParameterList"]),
+        ("sarif", &["\"version\": \"2.1.0\"", "\"ruleId\": \"ExcessiveParameterList\"", "\"name\": \"messrust\""]),
+        ("json", &["\"rule\": \"ExcessiveParameterList\"", "\"suppressed\": false"]),
+        ("ansi", &["\u{1b}[33m", "ExcessiveParameterList"]),
+    ];
+    for (format, needles) in cases {
+        let report = dir.path().join(format!("report.{format}"));
+        let (code, out, err) = run_cli(&[
+            path.to_str().unwrap(),
+            format,
+            "codesize",
+            "--reportfile",
+            report.to_str().unwrap(),
+        ]);
+        assert_eq!(code, EXIT_VIOLATION, "format={format} stderr={err:?}");
+        assert!(out.is_empty(), "format={format} stdout should be empty");
+        let body = fs::read_to_string(&report).unwrap();
+        for needle in *needles {
+            assert!(
+                body.contains(needle),
+                "format={format} missing {needle:?} in {body:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn method_violation_carries_class_and_method_context() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fixture.rs",
+        "struct S;\nimpl S {\n  fn m(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("\"class\": \"S\""), "stdout={out:?}");
+    assert!(out.contains("\"method\": \"m\""), "stdout={out:?}");
+}
+
+#[test]
 fn unknown_ruleset_exits_one() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
