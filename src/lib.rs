@@ -2,6 +2,7 @@
 
 mod analyze;
 mod discover;
+mod metrics;
 mod report;
 mod ruleset;
 

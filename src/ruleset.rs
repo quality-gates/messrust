@@ -15,6 +15,8 @@ pub struct LoadedRule {
     pub priority: u8,
     pub properties: BTreeMap<String, String>,
     pub kind: RuleKind,
+    /// phpmd-style message template with `{0}` placeholders.
+    pub message: String,
 }
 
 pub struct LoadOptions {
@@ -34,6 +36,7 @@ impl Default for LoadOptions {
 struct XmlRule {
     name: String,
     class: String,
+    message: String,
     ref_path: String,
     priority: Option<u8>,
     properties: BTreeMap<String, String>,
@@ -199,18 +202,33 @@ fn build_rule(
         ));
         return None;
     };
+    let message = if ov.message.is_empty() {
+        def.message.clone()
+    } else {
+        ov.message.clone()
+    };
     Some(LoadedRule {
         name: def.name.clone(),
         ruleset_name: set_name.to_string(),
         priority,
         properties,
         kind,
+        message,
     })
 }
 
 fn resolve_kind(class: &str) -> Option<RuleKind> {
     match class {
+        "PHPMD\\Rule\\CyclomaticComplexity" => Some(RuleKind::CyclomaticComplexity),
+        "PHPMD\\Rule\\Design\\NpathComplexity" => Some(RuleKind::NPathComplexity),
+        "PHPMD\\Rule\\Design\\LongMethod" => Some(RuleKind::ExcessiveMethodLength),
+        "PHPMD\\Rule\\Design\\LongClass" => Some(RuleKind::ExcessiveClassLength),
         "PHPMD\\Rule\\Design\\LongParameterList" => Some(RuleKind::ExcessiveParameterList),
+        "PHPMD\\Rule\\ExcessivePublicCount" => Some(RuleKind::ExcessivePublicCount),
+        "PHPMD\\Rule\\Design\\TooManyFields" => Some(RuleKind::TooManyFields),
+        "PHPMD\\Rule\\Design\\TooManyMethods" => Some(RuleKind::TooManyMethods),
+        "PHPMD\\Rule\\Design\\TooManyPublicMethods" => Some(RuleKind::TooManyPublicMethods),
+        "PHPMD\\Rule\\Design\\WeightedMethodCount" => Some(RuleKind::ExcessiveClassComplexity),
         _ => None,
     }
 }
@@ -300,6 +318,7 @@ fn parse_rule(node: roxmltree::Node<'_, '_>) -> XmlRule {
     let mut rule = XmlRule {
         name: node.attribute("name").unwrap_or("").to_string(),
         class: node.attribute("class").unwrap_or("").to_string(),
+        message: node.attribute("message").unwrap_or("").to_string(),
         ref_path: node.attribute("ref").unwrap_or("").to_string(),
         priority: None,
         properties: BTreeMap::new(),
