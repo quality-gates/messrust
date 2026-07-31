@@ -11,4 +11,9 @@ quality-gates mess detectors.
 
 ## Status
 
-Brand new. Nothing here yet.
+CLI, report formats, ruleset loading, and the full `codesize` rule catalog are
+in place. Other component rulesets still load as stubs until later tickets.
+
+Complexity metrics follow the quality-gates phpmd 2.15.0 pins; see
+[docs/codesize-metrics.md](docs/codesize-metrics.md) for Rust adaptations.
+
