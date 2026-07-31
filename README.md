@@ -12,8 +12,8 @@ quality-gates mess detectors.
 ## Status
 
 CLI, report formats, ruleset loading, and the full `codesize`, `naming`,
-`unusedcode`, and `cleancode` rule catalogs are in place. Other component
-rulesets still load as stubs until later tickets.
+`unusedcode`, `cleancode`, and `design` rule catalogs are in place. Other
+component rulesets still load as stubs until later tickets.
 
 Complexity metrics follow the quality-gates phpmd 2.15.0 pins; see
 [docs/codesize-metrics.md](docs/codesize-metrics.md). Naming adaptations
@@ -22,5 +22,7 @@ Complexity metrics follow the quality-gates phpmd 2.15.0 pins; see
 adaptations (single-file syntax analysis) are in
 [docs/unusedcode-adaptations.md](docs/unusedcode-adaptations.md). Cleancode
 adaptations (and PHP-only no-ops) are in
-[docs/cleancode-adaptations.md](docs/cleancode-adaptations.md).
+[docs/cleancode-adaptations.md](docs/cleancode-adaptations.md). Design
+adaptations (including the quiet `GotoStatement` identity rule) are in
+[docs/design-adaptations.md](docs/design-adaptations.md).
 

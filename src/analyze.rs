@@ -1,4 +1,4 @@
-//! Syntax-only analysis for codesize, naming, unusedcode, and cleancode rules.
+//! Syntax-only analysis for codesize, naming, unusedcode, cleancode, and design rules.
 
 use std::collections::{HashMap, HashSet};
 
@@ -42,6 +42,14 @@ pub enum RuleKind {
     IfStatementAssignment,
     DuplicatedArrayKey,
     StaticAccess,
+    ExitExpression,
+    GotoStatement,
+    CountInLoopExpression,
+    DevelopmentCodeFragment,
+    EmptyCatchBlock,
+    CouplingBetweenObjects,
+    GlobalVariable,
+    LackOfCohesionOfMethods,
 }
 
 const DEFAULT_CCN: usize = 10;
@@ -58,6 +66,9 @@ const DEFAULT_IGNORE_PATTERN: &str = "(^(set|get|is|has|with))i";
 const DEFAULT_SHORT_NAME: usize = 3;
 const DEFAULT_LONG_CLASS: usize = 40;
 const DEFAULT_LONG_VAR: usize = 20;
+const DEFAULT_CBO: usize = 13;
+const DEFAULT_LCOM4: usize = 1;
+const DEFAULT_DEV_FUNCS: &str = "println,print,eprintln,dbg";
 
 pub fn analyze_files(files: &[std::path::PathBuf], rules: &[LoadedRule]) -> Report {
     let mut report = Report::default();
@@ -647,6 +658,134 @@ fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Ve
                 }
             }
         }
+        // Rust has no goto; keep the rule loadable and quiet.
+        RuleKind::GotoStatement => {}
+        RuleKind::ExitExpression => {
+            for f in &model.functions {
+                let Some(body) = f.body else {
+                    continue;
+                };
+                if let Some(line) = exit_expression_line(body) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        line,
+                        format_message(&rule.message, &[&f.kind_label(), &f.name]),
+                    ));
+                }
+            }
+        }
+        RuleKind::CountInLoopExpression => {
+            for f in &model.functions {
+                let Some(body) = f.body else {
+                    continue;
+                };
+                for hit in count_in_loop_hits(body) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        hit.line,
+                        format_message(&rule.message, &[&hit.func_name, &hit.loop_kind]),
+                    ));
+                }
+            }
+        }
+        RuleKind::DevelopmentCodeFragment => {
+            let extra = rule
+                .properties
+                .get("unwanted-functions")
+                .map(String::as_str)
+                .unwrap_or("");
+            let unwanted = unwanted_function_set(extra);
+            for f in &model.functions {
+                let Some(body) = f.body else {
+                    continue;
+                };
+                let image = match &f.parent {
+                    Some(parent) => format!("{parent}::{}", f.name),
+                    None => f.name.clone(),
+                };
+                for hit in development_fragment_hits(body, &unwanted) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        hit.line,
+                        format_message(
+                            &rule.message,
+                            &[&f.kind_label(), &image, &hit.func_name],
+                        ),
+                    ));
+                }
+            }
+        }
+        RuleKind::EmptyCatchBlock => {
+            for f in &model.functions {
+                let Some(body) = f.body else {
+                    continue;
+                };
+                for line in empty_catch_lines(body) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        line,
+                        format_message(&rule.message, &[&f.name]),
+                    ));
+                }
+            }
+        }
+        RuleKind::CouplingBetweenObjects => {
+            let threshold = property_usize(rule, "maximum", DEFAULT_CBO);
+            for t in &model.types {
+                if t.node_type != "struct" && t.node_type != "enum" && t.node_type != "union" {
+                    continue;
+                }
+                let value = coupling_between_objects(t, model);
+                if value >= threshold {
+                    out.push(type_violation(
+                        rule,
+                        file,
+                        t,
+                        format_message(
+                            &rule.message,
+                            &[&t.name, &value.to_string(), &threshold.to_string()],
+                        ),
+                    ));
+                }
+            }
+        }
+        RuleKind::GlobalVariable => {
+            let report_immutable = property_bool(rule, "report-immutable", false);
+            for g in &model.static_muts {
+                if model.mutated_statics.contains(&g.name) || report_immutable {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        g.begin_line,
+                        format_message(&rule.message, &[&g.name]),
+                    ));
+                }
+            }
+        }
+        RuleKind::LackOfCohesionOfMethods => {
+            let threshold = property_usize(rule, "maximum", DEFAULT_LCOM4);
+            for t in &model.types {
+                if t.node_type != "struct" && t.node_type != "enum" && t.node_type != "union" {
+                    continue;
+                }
+                let value = lcom4(t);
+                if value > threshold {
+                    out.push(type_violation(
+                        rule,
+                        file,
+                        t,
+                        format_message(
+                            &rule.message,
+                            &[&t.name, &value.to_string()],
+                        ),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -1074,6 +1213,48 @@ fn static_receiver_type(path: &syn::Path) -> Option<String> {
     None
 }
 
+fn exit_expression_line(body: &syn::Block) -> Option<usize> {
+    let mut hit = None;
+    let mut visitor = ExitCallCollector { hit: &mut hit };
+    visitor.visit_block(body);
+    hit
+}
+
+struct ExitCallCollector<'a> {
+    hit: &'a mut Option<usize>,
+}
+
+impl ExitCallCollector<'_> {
+    fn consider_path(&mut self, path: &syn::Path, line: usize) {
+        if self.hit.is_some() {
+            return;
+        }
+        let Some(last) = path.segments.last() else {
+            return;
+        };
+        let name = last.ident.to_string();
+        if name == "exit" || name == "abort" {
+            *self.hit = Some(line);
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for ExitCallCollector<'_> {
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if self.hit.is_none() {
+            if let syn::Expr::Path(p) = &*node.func {
+                self.consider_path(&p.path, p.span().start().line);
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
 #[derive(Default)]
 struct DuplicateKeyCollector {
     keys: Vec<DuplicateKey>,
@@ -1173,6 +1354,7 @@ struct FnModel<'a> {
     bool_params: Vec<BoolParam>,
     body: Option<&'a syn::Block>,
     returns_bool: bool,
+    dep_types: Vec<String>,
 }
 
 impl FnModel<'_> {
@@ -1193,6 +1375,12 @@ struct MethodRef<'a> {
     body: Option<&'a syn::Block>,
 }
 
+#[derive(Clone)]
+struct FieldInfo {
+    name: String,
+    type_names: Vec<String>,
+}
+
 struct TypeModel<'a> {
     name: String,
     node_type: String,
@@ -1200,6 +1388,7 @@ struct TypeModel<'a> {
     end_line: usize,
     field_count: usize,
     public_fields: usize,
+    fields: Vec<FieldInfo>,
     methods: Vec<MethodRef<'a>>,
 }
 
@@ -1211,6 +1400,8 @@ struct FileModel<'a> {
     constants: Vec<NamedBinding>,
     usage: UseDefModel,
     duplicate_struct_keys: Vec<DuplicateKey>,
+    static_muts: Vec<NamedSite>,
+    mutated_statics: HashSet<String>,
 }
 
 struct UseDefModel {
@@ -1248,6 +1439,9 @@ impl<'a> FileModel<'a> {
         let mut dup = DuplicateKeyCollector::default();
         dup.visit_file(file);
 
+        let mut statics = StaticMutCollector::default();
+        statics.visit_file(file);
+
         let mut types: Vec<_> = types.into_values().collect();
         types.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
         functions.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
@@ -1259,6 +1453,8 @@ impl<'a> FileModel<'a> {
             constants: binder.constants,
             usage: usage.into_model(),
             duplicate_struct_keys: dup.keys,
+            static_muts: statics.static_muts,
+            mutated_statics: statics.mutated,
         }
     }
 }
@@ -1657,6 +1853,7 @@ fn upsert_type<'a>(
     end_line: usize,
     field_count: usize,
     public_fields: usize,
+    fields: Vec<FieldInfo>,
 ) {
     types
         .entry(name.clone())
@@ -1666,6 +1863,9 @@ fn upsert_type<'a>(
             existing.end_line = end_line;
             existing.field_count = field_count;
             existing.public_fields = public_fields;
+            if !fields.is_empty() {
+                existing.fields = fields.clone();
+            }
         })
         .or_insert_with(|| TypeModel {
             name,
@@ -1674,8 +1874,35 @@ fn upsert_type<'a>(
             end_line,
             field_count,
             public_fields,
+            fields,
             methods: Vec::new(),
         });
+}
+
+fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
+    match fields {
+        Fields::Named(n) => n
+            .named
+            .iter()
+            .filter_map(|f| {
+                let name = f.ident.as_ref()?.to_string();
+                Some(FieldInfo {
+                    name,
+                    type_names: type_names_in(&f.ty),
+                })
+            })
+            .collect(),
+        Fields::Unnamed(u) => u
+            .unnamed
+            .iter()
+            .enumerate()
+            .map(|(i, f)| FieldInfo {
+                name: i.to_string(),
+                type_names: type_names_in(&f.ty),
+            })
+            .collect(),
+        Fields::Unit => Vec::new(),
+    }
 }
 
 fn insert_struct<'a>(types: &mut HashMap<String, TypeModel<'a>>, s: &'a ItemStruct) {
@@ -1688,10 +1915,17 @@ fn insert_struct<'a>(types: &mut HashMap<String, TypeModel<'a>>, s: &'a ItemStru
         s.span().end().line,
         field_count,
         public_fields,
+        field_infos(&s.fields),
     );
 }
 
 fn insert_enum<'a>(types: &mut HashMap<String, TypeModel<'a>>, e: &'a ItemEnum) {
+    let mut fields = Vec::new();
+    for v in &e.variants {
+        for f in field_infos(&v.fields) {
+            fields.push(f);
+        }
+    }
     upsert_type(
         types,
         e.ident.to_string(),
@@ -1700,12 +1934,25 @@ fn insert_enum<'a>(types: &mut HashMap<String, TypeModel<'a>>, e: &'a ItemEnum) 
         e.span().end().line,
         e.variants.len(),
         0,
+        fields,
     );
 }
 
 fn insert_union<'a>(types: &mut HashMap<String, TypeModel<'a>>, u: &'a ItemUnion) {
     let field_count = u.fields.named.len();
     let public_fields = u.fields.named.iter().filter(|f| is_public(&f.vis)).count();
+    let fields = u
+        .fields
+        .named
+        .iter()
+        .filter_map(|f| {
+            let name = f.ident.as_ref()?.to_string();
+            Some(FieldInfo {
+                name,
+                type_names: type_names_in(&f.ty),
+            })
+        })
+        .collect();
     upsert_type(
         types,
         u.ident.to_string(),
@@ -1714,6 +1961,7 @@ fn insert_union<'a>(types: &mut HashMap<String, TypeModel<'a>>, u: &'a ItemUnion
         u.span().end().line,
         field_count,
         public_fields,
+        fields,
     );
 }
 
@@ -1746,6 +1994,7 @@ fn insert_trait<'a>(
                 bool_params: bool_params(&m.sig.inputs),
                 body,
                 returns_bool: returns_bool(&m.sig.output),
+                dep_types: sig_dep_types(&m.sig),
             });
         }
     }
@@ -1767,6 +2016,7 @@ fn insert_trait<'a>(
             end_line: t.span().end().line,
             field_count: 0,
             public_fields: 0,
+            fields: Vec::new(),
             methods,
         });
 }
@@ -1781,6 +2031,7 @@ fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
         bool_params: bool_params(&f.sig.inputs),
         body: Some(&f.block),
         returns_bool: returns_bool(&f.sig.output),
+        dep_types: sig_dep_types(&f.sig),
     }
 }
 
@@ -1800,6 +2051,7 @@ fn attach_impl<'a>(
         end_line: im.span().end().line,
         field_count: 0,
         public_fields: 0,
+        fields: Vec::new(),
         methods: Vec::new(),
     });
     let type_entry = types.get_mut(&ty_name).unwrap();
@@ -1825,7 +2077,556 @@ fn attach_impl<'a>(
                 bool_params: bool_params(&m.sig.inputs),
                 body: Some(&m.block),
                 returns_bool: returns_bool(&m.sig.output),
+                dep_types: sig_dep_types(&m.sig),
             });
         }
     }
+}
+
+fn sig_dep_types(sig: &syn::Signature) -> Vec<String> {
+    let mut names = Vec::new();
+    for input in &sig.inputs {
+        if let FnArg::Typed(pt) = input {
+            names.extend(type_names_in(&pt.ty));
+        }
+    }
+    if let ReturnType::Type(_, ty) = &sig.output {
+        names.extend(type_names_in(ty));
+    }
+    names
+}
+
+fn type_names_in(ty: &syn::Type) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_type_names(ty, &mut out);
+    out
+}
+
+fn collect_type_names(ty: &syn::Type, out: &mut Vec<String>) {
+    match ty {
+        syn::Type::Path(p) => {
+            if let Some(seg) = p.path.segments.last() {
+                out.push(seg.ident.to_string());
+                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                    for arg in &args.args {
+                        if let syn::GenericArgument::Type(inner) = arg {
+                            collect_type_names(inner, out);
+                        }
+                    }
+                }
+            }
+        }
+        syn::Type::Reference(r) => collect_type_names(&r.elem, out),
+        syn::Type::Slice(s) => collect_type_names(&s.elem, out),
+        syn::Type::Array(a) => collect_type_names(&a.elem, out),
+        syn::Type::Ptr(p) => collect_type_names(&p.elem, out),
+        syn::Type::Tuple(t) => {
+            for elem in &t.elems {
+                collect_type_names(elem, out);
+            }
+        }
+        syn::Type::Paren(p) => collect_type_names(&p.elem, out),
+        syn::Type::Group(g) => collect_type_names(&g.elem, out),
+        _ => {}
+    }
+}
+
+fn is_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "bool"
+            | "char"
+            | "str"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "f32"
+            | "f64"
+            | "Self"
+            | "self"
+    )
+}
+
+fn unwanted_function_set(extra: &str) -> HashSet<String> {
+    let mut set = HashSet::new();
+    for part in DEFAULT_DEV_FUNCS.split(',') {
+        set.insert(part.trim().to_ascii_lowercase());
+    }
+    for part in extra.split(',') {
+        let name = part.trim();
+        if !name.is_empty() {
+            set.insert(name.to_ascii_lowercase());
+        }
+    }
+    set
+}
+
+struct CountLoopHit {
+    line: usize,
+    func_name: String,
+    loop_kind: String,
+}
+
+fn count_in_loop_hits(body: &syn::Block) -> Vec<CountLoopHit> {
+    let mut hits = Vec::new();
+    let mut visitor = CountInLoopCollector { hits: &mut hits };
+    visitor.visit_block(body);
+    hits
+}
+
+struct CountInLoopCollector<'a> {
+    hits: &'a mut Vec<CountLoopHit>,
+}
+
+impl CountInLoopCollector<'_> {
+    fn scan_expr(&mut self, expr: &syn::Expr, loop_kind: &str) {
+        let mut finder = LenCallFinder {
+            hits: self.hits,
+            loop_kind: loop_kind.to_string(),
+        };
+        finder.visit_expr(expr);
+    }
+}
+
+impl<'ast> Visit<'ast> for CountInLoopCollector<'_> {
+    fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
+        self.scan_expr(&node.cond, "while");
+        syn::visit::visit_expr_while(self, node);
+    }
+
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        self.scan_expr(&node.expr, "for");
+        syn::visit::visit_expr_for_loop(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+struct LenCallFinder<'a> {
+    hits: &'a mut Vec<CountLoopHit>,
+    loop_kind: String,
+}
+
+impl<'ast> Visit<'ast> for LenCallFinder<'_> {
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let name = node.method.to_string();
+        if name == "len" || name == "capacity" {
+            self.hits.push(CountLoopHit {
+                line: node.method.span().start().line,
+                func_name: name,
+                loop_kind: self.loop_kind.clone(),
+            });
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = &*node.func {
+            if let Some(last) = p.path.segments.last() {
+                let name = last.ident.to_string();
+                if name == "len" || name == "capacity" {
+                    self.hits.push(CountLoopHit {
+                        line: last.ident.span().start().line,
+                        func_name: name,
+                        loop_kind: self.loop_kind.clone(),
+                    });
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+struct DevHit {
+    line: usize,
+    func_name: String,
+}
+
+fn development_fragment_hits(body: &syn::Block, unwanted: &HashSet<String>) -> Vec<DevHit> {
+    let mut hits = Vec::new();
+    let mut visitor = DevFragmentCollector {
+        unwanted,
+        hits: &mut hits,
+    };
+    visitor.visit_block(body);
+    hits
+}
+
+struct DevFragmentCollector<'a> {
+    unwanted: &'a HashSet<String>,
+    hits: &'a mut Vec<DevHit>,
+}
+
+impl DevFragmentCollector<'_> {
+    fn consider(&mut self, name: &str, line: usize) {
+        if self.unwanted.contains(&name.to_ascii_lowercase()) {
+            self.hits.push(DevHit {
+                line,
+                func_name: name.to_string(),
+            });
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for DevFragmentCollector<'_> {
+    fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+        if let Some(last) = node.mac.path.segments.last() {
+            self.consider(&last.ident.to_string(), last.ident.span().start().line);
+        }
+    }
+
+    fn visit_stmt_macro(&mut self, node: &'ast syn::StmtMacro) {
+        if let Some(last) = node.mac.path.segments.last() {
+            self.consider(&last.ident.to_string(), last.ident.span().start().line);
+        }
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = &*node.func {
+            if let Some(last) = p.path.segments.last() {
+                self.consider(&last.ident.to_string(), last.ident.span().start().line);
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+fn empty_catch_lines(body: &syn::Block) -> Vec<usize> {
+    let mut lines = Vec::new();
+    let mut visitor = EmptyCatchCollector { lines: &mut lines };
+    visitor.visit_block(body);
+    lines
+}
+
+struct EmptyCatchCollector<'a> {
+    lines: &'a mut Vec<usize>,
+}
+
+fn block_is_empty(block: &syn::Block) -> bool {
+    block.stmts.is_empty()
+}
+
+fn expr_is_empty_block(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::Block(b) => block_is_empty(&b.block),
+        syn::Expr::Tuple(t) if t.elems.is_empty() => true,
+        _ => false,
+    }
+}
+
+fn pat_is_err(pat: &Pat) -> bool {
+    match pat {
+        Pat::TupleStruct(ts) => ts
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "Err"),
+        Pat::Ident(id) => id.ident == "Err",
+        Pat::Or(p) => p.cases.iter().any(pat_is_err),
+        _ => false,
+    }
+}
+
+impl<'ast> Visit<'ast> for EmptyCatchCollector<'_> {
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        if let syn::Expr::Let(l) = &*node.cond {
+            if pat_is_err(&l.pat) && block_is_empty(&node.then_branch) {
+                self.lines
+                    .push(node.if_token.span().start().line);
+            }
+        }
+        syn::visit::visit_expr_if(self, node);
+    }
+
+    fn visit_arm(&mut self, node: &'ast syn::Arm) {
+        if pat_is_err(&node.pat) && expr_is_empty_block(&node.body) {
+            self.lines.push(node.pat.span().start().line);
+        }
+        syn::visit::visit_arm(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>) -> usize {
+    let mut deps = HashSet::new();
+    for field in &t.fields {
+        for name in &field.type_names {
+            if !is_builtin_type(name) && name != &t.name {
+                deps.insert(name.clone());
+            }
+        }
+    }
+    for f in &model.functions {
+        if f.parent.as_deref() != Some(t.name.as_str()) {
+            continue;
+        }
+        for name in &f.dep_types {
+            if !is_builtin_type(name) && name != &t.name {
+                deps.insert(name.clone());
+            }
+        }
+    }
+    deps.len()
+}
+
+#[derive(Default)]
+struct StaticMutCollector {
+    static_muts: Vec<NamedSite>,
+    mutated: HashSet<String>,
+    assign_lhs: bool,
+}
+
+impl<'ast> Visit<'ast> for StaticMutCollector {
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        if !matches!(node.mutability, syn::StaticMutability::None) {
+            self.static_muts.push(NamedSite {
+                name: node.ident.to_string(),
+                begin_line: node.ident.span().start().line,
+            });
+        }
+        syn::visit::visit_item_static(self, node);
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        if self.assign_lhs {
+            if let Some(ident) = path_single_ident(node) {
+                self.mutated.insert(ident);
+            }
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+
+    fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
+        self.assign_lhs = true;
+        self.visit_expr(&node.left);
+        self.assign_lhs = false;
+        self.visit_expr(&node.right);
+    }
+
+    fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
+        if matches!(
+            node.op,
+            syn::BinOp::AddAssign(_)
+                | syn::BinOp::SubAssign(_)
+                | syn::BinOp::MulAssign(_)
+                | syn::BinOp::DivAssign(_)
+                | syn::BinOp::RemAssign(_)
+                | syn::BinOp::BitXorAssign(_)
+                | syn::BinOp::BitAndAssign(_)
+                | syn::BinOp::BitOrAssign(_)
+                | syn::BinOp::ShlAssign(_)
+                | syn::BinOp::ShrAssign(_)
+        ) {
+            self.assign_lhs = true;
+            self.visit_expr(&node.left);
+            self.assign_lhs = false;
+            self.visit_expr(&node.right);
+        } else {
+            syn::visit::visit_expr_binary(self, node);
+        }
+    }
+}
+
+fn lcom4(t: &TypeModel<'_>) -> usize {
+    let field_names: HashSet<String> = t.fields.iter().map(|f| f.name.clone()).collect();
+    let method_idx: HashMap<String, usize> = t
+        .methods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.name.clone(), i))
+        .collect();
+    let mut accessor_of: HashMap<String, String> = HashMap::new();
+    for m in &t.methods {
+        if let Some(field) = accessor_field(m, &field_names) {
+            accessor_of.insert(m.name.clone(), field);
+        }
+    }
+
+    let n = t.methods.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    let mut active = vec![false; n];
+    let mut field_owner: HashMap<String, usize> = HashMap::new();
+
+    fn find(parent: &mut [usize], x: usize) -> usize {
+        let mut x = x;
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        parent[ra] = rb;
+    }
+
+    for (i, m) in t.methods.iter().enumerate() {
+        if accessor_of.contains_key(&m.name) {
+            continue;
+        }
+        let Some(body) = m.body else {
+            continue;
+        };
+        let (used_fields, called) = receiver_uses(body, &field_names, &method_idx);
+        for f in used_fields {
+            active[i] = true;
+            if let Some(owner) = field_owner.get(&f).copied() {
+                union(&mut parent, i, owner);
+            } else {
+                field_owner.insert(f, i);
+            }
+        }
+        for callee in called {
+            if let Some(field) = accessor_of.get(&callee) {
+                active[i] = true;
+                if let Some(owner) = field_owner.get(field).copied() {
+                    union(&mut parent, i, owner);
+                } else {
+                    field_owner.insert(field.clone(), i);
+                }
+            } else if let Some(&j) = method_idx.get(&callee) {
+                active[i] = true;
+                active[j] = true;
+                union(&mut parent, i, j);
+            }
+        }
+    }
+
+    let mut roots = HashSet::new();
+    for (i, on) in active.iter().enumerate() {
+        if *on {
+            roots.insert(find(&mut parent, i));
+        }
+    }
+    if roots.is_empty() {
+        1
+    } else {
+        roots.len()
+    }
+}
+
+fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Option<String> {
+    let body = m.body?;
+    if body.stmts.len() != 1 {
+        return None;
+    }
+    match &body.stmts[0] {
+        syn::Stmt::Expr(syn::Expr::Field(f), _) => {
+            if let (syn::Expr::Path(p), Member::Named(ident)) = (&*f.base, &f.member) {
+                if path_is_self(p) {
+                    let name = ident.to_string();
+                    if fields.contains(&name) {
+                        return Some(name);
+                    }
+                }
+            }
+            None
+        }
+        syn::Stmt::Expr(syn::Expr::Assign(a), _) => {
+            if let syn::Expr::Field(f) = &*a.left {
+                if let (syn::Expr::Path(p), Member::Named(ident)) = (&*f.base, &f.member) {
+                    if path_is_self(p) {
+                        let name = ident.to_string();
+                        if fields.contains(&name) {
+                            return Some(name);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn path_is_self(path: &syn::ExprPath) -> bool {
+    path_single_ident(path).as_deref() == Some("self")
+}
+
+fn receiver_uses(
+    body: &syn::Block,
+    fields: &HashSet<String>,
+    methods: &HashMap<String, usize>,
+) -> (Vec<String>, Vec<String>) {
+    let mut used_fields = Vec::new();
+    let mut called = Vec::new();
+    let mut visitor = ReceiverUseCollector {
+        fields,
+        methods,
+        used_fields: &mut used_fields,
+        called: &mut called,
+    };
+    visitor.visit_block(body);
+    used_fields.sort();
+    used_fields.dedup();
+    called.sort();
+    called.dedup();
+    (used_fields, called)
+}
+
+struct ReceiverUseCollector<'a> {
+    fields: &'a HashSet<String>,
+    methods: &'a HashMap<String, usize>,
+    used_fields: &'a mut Vec<String>,
+    called: &'a mut Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for ReceiverUseCollector<'_> {
+    fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+        if let syn::Expr::Path(p) = &*node.base {
+            if path_is_self(p) {
+                if let Member::Named(ident) = &node.member {
+                    let name = ident.to_string();
+                    if self.fields.contains(&name) {
+                        self.used_fields.push(name);
+                    }
+                }
+            }
+        }
+        syn::visit::visit_expr_field(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if let syn::Expr::Path(p) = &*node.receiver {
+            if path_is_self(p) {
+                let name = node.method.to_string();
+                if self.methods.contains_key(&name) {
+                    self.called.push(name);
+                }
+            }
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
 }
