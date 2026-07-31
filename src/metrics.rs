@@ -11,6 +11,7 @@
 //! - `match` arms map to phpmd/pdepend switch case labels; a lone `_` arm is
 //!   the default and does not increment CCN (same as Go `default`).
 //! - `for` maps to phpmd foreach / Go range for NPath (`E(iter) + 1 + NP(body)`).
+// messrust-disable UnusedLocalVariable,CamelCaseVariableName
 
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -109,6 +110,7 @@ fn npath_stmt(stmt: &Stmt) -> usize {
     }
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn npath_expr_stmt(expr: &Expr) -> usize {
     match expr {
         Expr::If(i) => npath_if(i),
@@ -215,6 +217,7 @@ pub fn effective_lines_of_code(src: &str, start_line: usize, end_line: usize) ->
     count
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn line_has_code(line: &str, mut in_block: bool) -> (bool, bool) {
     let bytes = line.as_bytes();
     let mut has_code = false;

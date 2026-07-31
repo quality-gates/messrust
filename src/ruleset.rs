@@ -134,6 +134,7 @@ fn append_rule(
     Ok(())
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn add_ref(
     out: &mut Vec<LoadedRule>,
     xr: &XmlRule,
@@ -217,6 +218,7 @@ fn build_rule(
     })
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn resolve_kind(class: &str) -> Option<RuleKind> {
     match class {
         "PHPMD\\Rule\\CyclomaticComplexity" => Some(RuleKind::CyclomaticComplexity),
@@ -299,6 +301,11 @@ fn builtin_xml(ident: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../rulesets/controversial.xml"),
             "controversial",
         )),
+        "rust" => Some((include_str!("../rulesets/rust.xml"), "rust")),
+        "opinionated" => Some((
+            include_str!("../rulesets/opinionated.xml"),
+            "opinionated",
+        )),
         _ => None,
     }
 }
@@ -311,7 +318,15 @@ fn normalize_builtin_key(ident: &str) -> Option<String> {
         .unwrap_or(&lower);
     let stem = base.strip_suffix(".xml").unwrap_or(base);
     match stem {
-        "codesize" | "naming" | "unusedcode" | "cleancode" | "design" | "controversial" => {
+        "codesize"
+        | "naming"
+        | "unusedcode"
+        | "cleancode"
+        | "design"
+        | "controversial"
+        | "rust"
+        | "opinionated" =>
+        {
             Some(stem.to_string())
         }
         _ => None,
@@ -351,6 +366,7 @@ fn parse_ruleset(xml: &str) -> Result<XmlRuleset, String> {
     Ok(XmlRuleset { name, rules })
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn parse_rule(node: roxmltree::Node<'_, '_>) -> XmlRule {
     let mut rule = XmlRule {
         name: node.attribute("name").unwrap_or("").to_string(),

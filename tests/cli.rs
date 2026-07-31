@@ -51,6 +51,7 @@ fn help_prints_usage_to_stdout_and_exits_zero() {
         assert_eq!(code, EXIT_SUCCESS, "flag={flag}");
         assert!(out.contains("Usage:"), "stdout={out:?}");
         assert!(out.contains("messrust"), "stdout={out:?}");
+        assert!(out.contains("--strict"), "stdout={out:?}");
         assert!(err.is_empty(), "stderr={err:?}");
     }
 }
@@ -181,6 +182,8 @@ fn discovery_skips_junk_dirs_and_honours_exclude_suffixes_ignore_tests() {
     write_file(dir.path(), "node_modules/hidden.rs", &fixture_with_params(11));
     write_file(dir.path(), "vendor/skip_me.rs", &fixture_with_params(11));
     write_file(dir.path(), "src/foo_test.rs", &fixture_with_params(11));
+    write_file(dir.path(), "tests/integration.rs", &fixture_with_params(11));
+    write_file(dir.path(), "src/tests.rs", &fixture_with_params(11));
 
     // Default: src/a.rs + src/foo_test.rs + vendor/skip_me.rs
     // (junk dirs skipped; .txt ignored; _test.rs kept without --ignore-tests)
@@ -191,6 +194,8 @@ fn discovery_skips_junk_dirs_and_honours_exclude_suffixes_ignore_tests() {
     assert!(!out.contains("hidden.rs"), "stdout={out:?}");
     assert!(!out.contains("b.txt"), "stdout={out:?}");
     assert!(out.contains("foo_test.rs"), "stdout={out:?}");
+    assert!(out.contains("integration.rs"), "stdout={out:?}");
+    assert!(out.contains("tests.rs"), "stdout={out:?}");
 
     // --exclude vendor substring
     let (code, out, _) = run_cli(&[
@@ -214,6 +219,8 @@ fn discovery_skips_junk_dirs_and_honours_exclude_suffixes_ignore_tests() {
     assert_eq!(code, EXIT_VIOLATION);
     assert!(out.contains("a.rs"), "stdout={out:?}");
     assert!(!out.contains("foo_test.rs"), "stdout={out:?}");
+    assert!(!out.contains("integration.rs"), "stdout={out:?}");
+    assert!(!out.contains("tests.rs"), "stdout={out:?}");
 
     // --suffixes .txt only
     let (code, out, _) = run_cli(&[
@@ -257,6 +264,122 @@ fn both_ignore_flags_with_errors_and_violations_exits_zero() {
     assert_eq!(code, EXIT_SUCCESS);
     assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
     assert!(out.contains("bad.rs"), "stdout={out:?}");
+}
+
+#[test]
+fn source_suppression_is_omitted_by_default() {
+    let dir = TempDir::new().unwrap();
+    let source = format!(
+        "// messrust-disable-next-line ExcessiveParameterList\n{}",
+        fixture_with_params(11)
+    );
+    let path = write_file(dir.path(), "fixture.rs", &source);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(report["files"].as_array().unwrap().is_empty(), "report={out}");
+}
+
+#[test]
+fn strict_source_suppression_keeps_finding_and_marks_it() {
+    let dir = TempDir::new().unwrap();
+    let source = format!(
+        "// messrust-disable-next-line ExcessiveParameterList\n{}",
+        fixture_with_params(11)
+    );
+    let path = write_file(dir.path(), "fixture.rs", &source);
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "json",
+        "codesize",
+        "--strict",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(out.matches("ExcessiveParameterList").count(), 1);
+    assert!(out.contains("\"suppressed\": true"), "report={out}");
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--strict",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("[suppressed]"), "stdout={out:?}");
+}
+
+#[test]
+fn source_suppression_regions_can_be_reenabled() {
+    let dir = TempDir::new().unwrap();
+    let first = fixture_with_params(11);
+    let second = fixture_with_params(12).replacen("entry_point", "second", 1);
+    let third = fixture_with_params(13).replacen("entry_point", "third", 1);
+    let source = format!(
+        "// messrust-disable ExcessiveParameterList\n{first}{second}// messrust-enable ExcessiveParameterList\n{third}"
+    );
+    let path = write_file(dir.path(), "fixture.rs", &source);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(!out.contains(":2"), "suppressed first finding: {out:?}");
+    assert!(!out.contains(":3"), "suppressed second finding: {out:?}");
+    assert!(out.contains(":5"), "re-enabled third finding: {out:?}");
+}
+
+#[test]
+fn directive_text_in_a_string_does_not_suppress_a_finding() {
+    let dir = TempDir::new().unwrap();
+    let source = format!(
+        "const TEXT: &str = \"// messrust-disable-next-line ExcessiveParameterList\";\n{}",
+        fixture_with_params(11)
+    );
+    let path = write_file(dir.path(), "fixture.rs", &source);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn ignore_tests_skips_cfg_test_modules_inside_production_files() {
+    let dir = TempDir::new().unwrap();
+    let production = fixture_with_params(11).replacen("entry_point", "production", 1);
+    let test_only = fixture_with_params(12).replacen("entry_point", "test_only", 1);
+    let source = format!(
+        "{production}#[cfg(test)]\nmod tests {{\n{test_only}}}\n"
+    );
+    let path = write_file(dir.path(), "src.rs", &source);
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("production"), "stdout={out:?}");
+    assert!(out.contains("test_only"), "stdout={out:?}");
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("production"), "stdout={out:?}");
+    assert!(!out.contains("test_only"), "stdout={out:?}");
+}
+
+#[test]
+fn rust_policy_allows_short_local_names_but_opinionated_policy_reports_them() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", "fn main() { let x = 1; let _ = x; }\n");
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "rust"]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}, stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "opinionated"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ShortVariable"), "stdout={out:?}");
 }
 
 #[test]

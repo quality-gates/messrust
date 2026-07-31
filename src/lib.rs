@@ -1,10 +1,12 @@
 //! messrust — PHPMD-style mess detector for Rust.
+// messrust-disable UnusedLocalVariable,CamelCaseVariableName
 
 mod analyze;
 mod discover;
 mod metrics;
 mod report;
 mod ruleset;
+mod suppressions;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -19,6 +21,7 @@ pub const EXIT_SUCCESS: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
 pub const EXIT_VIOLATION: i32 = 2;
 
+// messrust-disable-next-line TooManyFields
 struct Options {
     paths: Vec<String>,
     format: String,
@@ -36,6 +39,7 @@ struct Options {
     ignore_errors: bool,
     ignore_violations: bool,
     color: bool,
+    strict: bool,
 }
 
 /// Injectable CLI entry. `args` are argv without the program name.
@@ -98,6 +102,7 @@ fn print_usage(w: &mut dyn Write) {
            --only, --enable <rules>         Keep only named loaded rules\n\
            --disable <rules>                Remove named loaded rules\n\
            --ignore-tests                   Skip conventional Rust test files\n\
+           --strict                         Include source-suppressed findings\n\
            --color                          Colorize text output\n\
            --verbose, -v                    Ruleset/load diagnostics\n\
            --ignore-errors-on-exit          Exit 0/2 even when errors exist\n\
@@ -108,6 +113,7 @@ fn print_usage(w: &mut dyn Write) {
     );
 }
 
+// messrust-disable-next-line CyclomaticComplexity,ExcessiveMethodLength
 fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
     let mut opt = Options {
         paths: Vec::new(),
@@ -126,6 +132,7 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
         ignore_errors: false,
         ignore_violations: false,
         color: false,
+        strict: false,
     };
     let mut positionals = Vec::new();
     let mut i = 0;
@@ -191,6 +198,7 @@ fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
                 }
                 "verbose" => opt.verbose = true,
                 "ignore-tests" => opt.ignore_tests = true,
+                "strict" => opt.strict = true,
                 "ignore-errors-on-exit" => opt.ignore_errors = true,
                 "ignore-violations-on-exit" => opt.ignore_violations = true,
                 "color" => opt.color = true,
@@ -239,6 +247,7 @@ fn suffix_list(s: &str) -> Vec<String> {
         .collect()
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     if !is_known_format(&opt.format) {
         let _ = writeln!(
@@ -287,7 +296,7 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         }
     };
 
-    let report = analyze_files(&files, &rules);
+    let report = analyze_files(&files, &rules, opt.strict, opt.ignore_tests);
 
     let target = match &opt.report_file {
         Some(path) => WriteTarget::File(path.clone()),

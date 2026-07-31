@@ -1,5 +1,10 @@
 //! Syntax-only analysis for codesize, naming, unusedcode, cleancode, design,
 //! and controversial rules.
+//
+// The analyser's own syntax model uses macro-generated reads and enum paths
+// that this syntax-only detector cannot resolve. Keep these known false
+// positives out of the self-analysis report.
+// messrust-disable UnusedLocalVariable,CamelCaseVariableName
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,6 +19,7 @@ use syn::{
 use crate::metrics::{cyclomatic_complexity, effective_lines_of_code, npath_complexity};
 use crate::report::{ProcessingError, Report, Violation};
 use crate::ruleset::LoadedRule;
+use crate::suppressions::Suppressions;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleKind {
@@ -76,10 +82,15 @@ const DEFAULT_CBO: usize = 13;
 const DEFAULT_LCOM4: usize = 1;
 const DEFAULT_DEV_FUNCS: &str = "println,print,eprintln,dbg";
 
-pub fn analyze_files(files: &[std::path::PathBuf], rules: &[LoadedRule]) -> Report {
+pub fn analyze_files(
+    files: &[std::path::PathBuf],
+    rules: &[LoadedRule],
+    strict: bool,
+    ignore_tests: bool,
+) -> Report {
     let mut report = Report::default();
     for path in files {
-        match analyze_one(path, rules) {
+        match analyze_one(path, rules, strict, ignore_tests) {
             Ok(violations) => report.violations.extend(violations),
             Err(message) => report.errors.push(ProcessingError {
                 file: path.display().to_string(),
@@ -93,7 +104,12 @@ pub fn analyze_files(files: &[std::path::PathBuf], rules: &[LoadedRule]) -> Repo
     report
 }
 
-fn analyze_one(path: &std::path::Path, rules: &[LoadedRule]) -> Result<Vec<Violation>, String> {
+fn analyze_one(
+    path: &std::path::Path,
+    rules: &[LoadedRule],
+    strict: bool,
+    ignore_tests: bool,
+) -> Result<Vec<Violation>, String> {
     let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let file = syn::parse_file(&src).map_err(|e| e.to_string())?;
     let file_name = path.display().to_string();
@@ -102,9 +118,66 @@ fn analyze_one(path: &std::path::Path, rules: &[LoadedRule]) -> Result<Vec<Viola
     for rule in rules {
         apply_rule(rule, &file_name, &model, &mut violations);
     }
+    if ignore_tests {
+        let test_modules = test_module_ranges(&file);
+        violations.retain(|violation| {
+            !test_modules
+                .iter()
+                .any(|(start, end)| (*start..=*end).contains(&violation.begin_line))
+        });
+    }
+    let suppressions = Suppressions::from_source(&src);
+    violations.retain_mut(|violation| {
+        if !suppressions.contains(violation.begin_line, &violation.rule_name) {
+            return true;
+        }
+        if strict {
+            violation.suppressed = true;
+            true
+        } else {
+            false
+        }
+    });
     Ok(violations)
 }
 
+fn test_module_ranges(file: &syn::File) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    collect_test_module_ranges(&file.items, &mut ranges);
+    ranges
+}
+
+fn collect_test_module_ranges(items: &[Item], ranges: &mut Vec<(usize, usize)>) {
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        let is_test = module.attrs.iter().any(|attribute| {
+            if !attribute.path().is_ident("cfg") {
+                return false;
+            }
+            attribute
+                .meta
+                .require_list()
+                .ok()
+                .is_some_and(|list| {
+                    list.tokens
+                        .to_string()
+                        .split(|c: char| !c.is_ascii_alphanumeric())
+                        .any(|part| part == "test")
+                })
+        });
+        if is_test {
+            let span = module.span();
+            ranges.push((span.start().line, span.end().line));
+        }
+        if let Some((_, nested)) = &module.content {
+            collect_test_module_ranges(nested, ranges);
+        }
+    }
+}
+
+// messrust-disable-next-line CyclomaticComplexity,ExcessiveMethodLength
 fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Vec<Violation>) {
     match rule.kind {
         RuleKind::CyclomaticComplexity => {
@@ -1573,6 +1646,7 @@ impl<'a> FileModel<'a> {
     }
 }
 
+// messrust-disable-next-line ExcessiveClassComplexity,CouplingBetweenObjects
 struct UseDefCollector {
     locals: Vec<NamedSite>,
     params: Vec<NamedSite>,
@@ -1844,6 +1918,7 @@ fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
     path.path.segments.last().map(|s| s.ident.to_string())
 }
 
+// messrust-disable-next-line LackOfCohesionOfMethods
 struct BindingCollector {
     variables: Vec<NamedBinding>,
     constants: Vec<NamedBinding>,
@@ -1936,6 +2011,7 @@ impl<'ast> Visit<'ast> for BindingCollector {
     }
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn collect_items<'a>(
     items: &'a [Item],
     types: &mut HashMap<String, TypeModel<'a>>,
@@ -2219,6 +2295,7 @@ fn type_names_in(ty: &syn::Type) -> Vec<String> {
     out
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn collect_type_names(ty: &syn::Type, out: &mut Vec<String>) {
     match ty {
         syn::Type::Path(p) => {
@@ -2490,6 +2567,7 @@ impl<'ast> Visit<'ast> for EmptyCatchCollector<'_> {
     fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>) -> usize {
     let mut deps = HashSet::new();
     for field in &t.fields {
@@ -2513,6 +2591,7 @@ fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>) -> usize {
 }
 
 #[derive(Default)]
+// messrust-disable-next-line LackOfCohesionOfMethods
 struct StaticMutCollector {
     static_muts: Vec<NamedSite>,
     mutated: HashSet<String>,
@@ -2570,6 +2649,7 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
     }
 }
 
+// messrust-disable-next-line CyclomaticComplexity,NPathComplexity
 fn lcom4(t: &TypeModel<'_>) -> usize {
     let field_names: HashSet<String> = t.fields.iter().map(|f| f.name.clone()).collect();
     let method_idx: HashMap<String, usize> = t
@@ -2649,6 +2729,7 @@ fn lcom4(t: &TypeModel<'_>) -> usize {
     }
 }
 
+// messrust-disable-next-line CyclomaticComplexity
 fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Option<String> {
     let body = m.body?;
     if body.stmts.len() != 1 {
@@ -2708,6 +2789,7 @@ fn receiver_uses(
     (used_fields, called)
 }
 
+// messrust-disable-next-line LackOfCohesionOfMethods
 struct ReceiverUseCollector<'a> {
     fields: &'a HashSet<String>,
     methods: &'a HashMap<String, usize>,

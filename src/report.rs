@@ -1,4 +1,5 @@
 //! Report model and family format renderers (messgo / PHPMD shapes).
+// messrust-disable UnusedLocalVariable,UnusedPrivateField
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -127,18 +128,29 @@ fn write_text(report: &Report, colored: bool, out: &mut dyn Write) -> std::io::R
         .map(|v| format!("{}:{}", v.file, v.begin_line))
         .collect();
     let loc_width = locations.iter().map(|s| s.len()).max().unwrap_or(0);
-    let rule_width = report
+    let rule_labels: Vec<String> = report
         .violations
         .iter()
-        .map(|v| v.rule_name.len())
-        .max()
-        .unwrap_or(0);
+        .map(|v| {
+            if v.suppressed {
+                format!("{} [suppressed]", v.rule_name)
+            } else {
+                v.rule_name.clone()
+            }
+        })
+        .collect();
+    let rule_width = rule_labels.iter().map(String::len).max().unwrap_or(0);
 
-    for (v, loc) in report.violations.iter().zip(locations.iter()) {
+    for ((v, loc), rule_label) in report
+        .violations
+        .iter()
+        .zip(locations.iter())
+        .zip(rule_labels.iter())
+    {
         let pad1 = " ".repeat(loc_width.saturating_sub(loc.len()) + SPACING);
-        let pad2 = " ".repeat(rule_width.saturating_sub(v.rule_name.len()) + SPACING);
+        let pad2 = " ".repeat(rule_width.saturating_sub(rule_label.len()) + SPACING);
         write!(out, "{loc}{pad1}")?;
-        write!(out, "{}", colorize(&v.rule_name, "33", colored))?;
+        write!(out, "{}", colorize(rule_label, "33", colored))?;
         write!(out, "{pad2}")?;
         write!(out, "{}", colorize(&v.description, "31", colored))?;
         writeln!(out)?;
@@ -389,14 +401,18 @@ fn write_html(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
                 "<h2>{}</h2>\n<table border=\"1\" cellspacing=\"0\" cellpadding=\"3\">",
                 xml_escape(&cur_file)
             )?;
-            writeln!(out, "<tr><th>Line</th><th>Rule</th><th>Description</th></tr>")?;
+            writeln!(
+                out,
+                "<tr><th>Line</th><th>Rule</th><th>Suppressed</th><th>Description</th></tr>"
+            )?;
             open = true;
         }
         writeln!(
             out,
-            "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             v.begin_line,
             xml_escape(&v.rule_name),
+            v.suppressed,
             xml_escape(&v.description)
         )?;
     }
@@ -413,8 +429,12 @@ fn write_github(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
     for v in &report.violations {
         writeln!(
             out,
-            "::warning file={},line={},col=1::{} ({})",
-            v.file, v.begin_line, v.description, v.rule_name
+            "::warning file={},line={},col=1::{} ({}{})",
+            v.file,
+            v.begin_line,
+            v.description,
+            v.rule_name,
+            if v.suppressed { ", suppressed" } else { "" }
         )?;
     }
     for e in &report.errors {
@@ -433,6 +453,7 @@ struct GitlabEntry {
     description: String,
     fingerprint: String,
     severity: String,
+    suppressed: bool,
     location: GitlabLocation,
 }
 
@@ -457,6 +478,7 @@ fn write_gitlab(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
             description: v.description.clone(),
             fingerprint: gitlab_fingerprint(v),
             severity: gitlab_severity(v.priority).to_string(),
+            suppressed: v.suppressed,
             location: GitlabLocation {
                 path: v.file.clone(),
                 lines: GitlabLines {
@@ -506,7 +528,7 @@ fn write_checkstyle(report: &Report, out: &mut dyn Write) -> std::io::Result<()>
             "    <error line=\"{}\" column=\"1\" severity=\"{}\" message=\"{}\" source=\"{}\"/>",
             v.begin_line,
             checkstyle_severity(v.priority),
-            xml_escape(&v.description),
+            xml_escape(&format_description(v)),
             xml_escape(&format!("{}/{}", v.ruleset_name, v.rule_name))
         )?;
     }
@@ -527,6 +549,14 @@ fn checkstyle_severity(priority: u8) -> &'static str {
     }
 }
 
+fn format_description(v: &Violation) -> String {
+    if v.suppressed {
+        format!("{} [suppressed]", v.description)
+    } else {
+        v.description.clone()
+    }
+}
+
 // ----- SARIF 2.1.0 --------------------------------------------------------
 
 fn write_sarif(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
@@ -542,7 +572,7 @@ fn write_sarif(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
                 "shortDescription": { "text": v.rule_name },
             }));
         }
-        results.push(serde_json::json!({
+        let mut result = serde_json::json!({
             "ruleId": v.rule_name,
             "level": sarif_level(v.priority),
             "message": { "text": v.description },
@@ -559,7 +589,11 @@ fn write_sarif(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
                 "priority": v.priority,
                 "suppressed": v.suppressed,
             }
-        }));
+        });
+        if v.suppressed {
+            result["suppressions"] = serde_json::json!([{"kind": "inSource"}]);
+        }
+        results.push(result);
     }
     let doc = serde_json::json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",

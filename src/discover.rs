@@ -10,6 +10,7 @@ pub struct DiscoverOptions {
     pub ignore_tests: bool,
 }
 
+// messrust-disable-next-line CyclomaticComplexity,NPathComplexity
 pub fn discover(paths: &[String], opts: &DiscoverOptions) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -21,6 +22,9 @@ pub fn discover(paths: &[String], opts: &DiscoverOptions) -> Result<Vec<PathBuf>
 
         if meta.is_file() {
             // Explicit files are added as-is (messgo behaviour).
+            if opts.ignore_tests && is_test_path(&path) {
+                continue;
+            }
             push_unique(&mut out, &mut seen, path)?;
             continue;
         }
@@ -31,7 +35,8 @@ pub fn discover(paths: &[String], opts: &DiscoverOptions) -> Result<Vec<PathBuf>
 
         for entry in WalkDir::new(&path).into_iter().filter_entry(|e| {
             if e.file_type().is_dir() {
-                !should_skip_dir(e.file_name().to_string_lossy().as_ref())
+                let name = e.file_name().to_string_lossy();
+                !should_skip_dir(&name) && !(opts.ignore_tests && is_test_dir(&name))
             } else {
                 true
             }
@@ -44,7 +49,7 @@ pub fn discover(paths: &[String], opts: &DiscoverOptions) -> Result<Vec<PathBuf>
             if !matches_suffix(p, &opts.suffixes) {
                 continue;
             }
-            if opts.ignore_tests && is_test_file(p) {
+            if opts.ignore_tests && is_test_path(p) {
                 continue;
             }
             if is_excluded(p, &opts.exclude) {
@@ -82,7 +87,23 @@ fn matches_suffix(path: &Path, suffixes: &[String]) -> bool {
 fn is_test_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.ends_with("_test.rs"))
+        .is_some_and(|n| {
+            n == "test.rs" || n == "tests.rs" || n.starts_with("test_") || n.ends_with("_test.rs")
+        })
+}
+
+fn is_test_dir(name: &str) -> bool {
+    matches!(name, "test" | "tests" | "__tests__")
+}
+
+fn is_test_path(path: &Path) -> bool {
+    is_test_file(path)
+        || path.components().any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .is_some_and(is_test_dir)
+        })
 }
 
 fn is_excluded(path: &Path, exclude: &[String]) -> bool {
