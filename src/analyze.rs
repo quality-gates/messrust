@@ -34,7 +34,7 @@ pub fn analyze_files(files: &[std::path::PathBuf], rules: &[RuleId]) -> Report {
 
 fn analyze_one(path: &Path, rules: &[RuleId]) -> Result<Vec<Violation>, String> {
     let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let file = syn::parse_file(&src).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = syn::parse_file(&src).map_err(|e| e.to_string())?;
 
     let mut violations = Vec::new();
     if rules.contains(&RuleId::ExcessiveParameterList) {
