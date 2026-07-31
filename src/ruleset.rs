@@ -247,6 +247,14 @@ fn resolve_kind(class: &str) -> Option<RuleKind> {
         "PHPMD\\Rule\\CleanCode\\IfStatementAssignment" => Some(RuleKind::IfStatementAssignment),
         "PHPMD\\Rule\\CleanCode\\DuplicatedArrayKey" => Some(RuleKind::DuplicatedArrayKey),
         "PHPMD\\Rule\\CleanCode\\StaticAccess" => Some(RuleKind::StaticAccess),
+        "PHPMD\\Rule\\Design\\ExitExpression" => Some(RuleKind::ExitExpression),
+        "PHPMD\\Rule\\Design\\GotoStatement" => Some(RuleKind::GotoStatement),
+        "PHPMD\\Rule\\Design\\CountInLoopExpression" => Some(RuleKind::CountInLoopExpression),
+        "PHPMD\\Rule\\Design\\DevelopmentCodeFragment" => Some(RuleKind::DevelopmentCodeFragment),
+        "PHPMD\\Rule\\Design\\EmptyCatchBlock" => Some(RuleKind::EmptyCatchBlock),
+        "PHPMD\\Rule\\Design\\CouplingBetweenObjects" => Some(RuleKind::CouplingBetweenObjects),
+        "PHPMD\\Rule\\Design\\GlobalVariable" => Some(RuleKind::GlobalVariable),
+        "PHPMD\\Rule\\Design\\LackOfCohesionOfMethods" => Some(RuleKind::LackOfCohesionOfMethods),
         _ => None,
     }
 }
