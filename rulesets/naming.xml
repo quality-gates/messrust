@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Naming Rules"
+         xmlns="http://pmd.sf.net/ruleset/1.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sf.net/ruleset/1.0.0 http://pmd.sf.net/ruleset_xml_schema.xsd"
+         xsi:noNamespaceSchemaLocation="http://pmd.sf.net/ruleset_xml_schema.xsd">
+    <description>
+The Naming Ruleset contains a collection of rules about names - too long, too short, and so forth.
+    </description>
+
+    <rule name="ShortClassName"
+          since="2.9"
+          message="Avoid classes with short names like {0}. Configured minimum length is {1}."
+          class="PHPMD\Rule\Naming\ShortClassName"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#shortclassname">
+        <description>
+            Detects when classes or interfaces have a very short name.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="minimum" description="The class name length reporting threshold" value="3"/>
+            <property name="exceptions" description="Comma-separated list of exceptions. Example: Log,URL,FTP" value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+class Fo
+{
+}
+
+interface Fo
+{
+}
+]]>
+        </example>
+    </rule>
+
+    <rule name="LongClassName"
+          since="2.9"
+          message="Avoid excessively long class names like {0}. Keep class name length under {1}."
+          class="PHPMD\Rule\Naming\LongClassName"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#longclassname">
+        <description>
+            Detects when classes or interfaces are declared with excessively long names.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="maximum" description="The class name length reporting threshold" value="40"/>
+            <property name="subtract-prefixes" description="Comma-separated list of prefixes that will not count in the length of the class name. Only the first matching prefix will be subtracted." value=""/>
+            <property name="subtract-suffixes" description="Comma-separated list of suffixes that will not count in the length of the class name. Only the first matching suffix will be subtracted." value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+class ATooLongClassNameThatHintsAtADesignProblem
+{
+}
+]]>
+        </example>
+    </rule>
+
+    <rule name="ShortVariable"
+          since="0.2"
+          message="Avoid variables with short names like {0}. Configured minimum length is {1}."
+          class="PHPMD\Rule\Naming\ShortVariable"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#shortvariable">
+        <description>
+Detects when a field, local, or parameter has a very short name.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="minimum" description="Minimum length for a variable, property or parameter name" value="3"/>
+            <property name="exceptions" description="Comma-separated list of exceptions" value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+class Something
+{
+    private int _q = 15; // VIOLATION - Field
+    public void Main(int[] xs) // VIOLATION - Parameter
+    {
+        int r = 20; // VIOLATION - Local
+        for (int i = 0; i < 10; i++) // Not a violation (for initializer)
+        {
+            r += _q;
+        }
+    }
+}
+]]>
+        </example>
+    </rule>
+
+    <rule name="LongVariable"
+          since="0.2"
+          message="Avoid excessively long variable names like {0}. Keep variable name length under {1}."
+          class="PHPMD\Rule\Naming\LongVariable"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#longvariable">
+        <description>
+Detects when a field, formal or local variable is declared with a long name.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="maximum" description="The variable length reporting threshold" value="20"/>
+            <property name="subtract-prefixes" description="Comma-separated list of prefixes that will not count in the length of the variable name. Only the first matching prefix will be subtracted." value=""/>
+            <property name="subtract-suffixes" description="Comma-separated list of suffixes that will not count in the length of the variable name. Only the first matching suffix will be subtracted." value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+class Something
+{
+    protected int _reallyLongIntName = -3; // VIOLATION - Field
+    public void Main(int[] interestingArgumentsList) // VIOLATION - Parameter
+    {
+        int otherReallyLongName = -5; // VIOLATION - Local
+    }
+}
+]]>
+        </example>
+    </rule>
+
+    <rule name="ShortMethodName"
+          since="0.2"
+          message="Avoid using short method names like {0}::{1}(). The configured minimum method name length is {2}."
+          class="PHPMD\Rule\Naming\ShortMethodName"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#shortmethodname">
+        <description>
+Detects when very short method names are used.
+        </description>
+        <priority>3</priority>
+        <properties>
+            <property name="minimum" description="Minimum length for a method or function name" value="3"/>
+            <property name="exceptions" description="Comma-separated list of exceptions" value=""/>
+        </properties>
+        <example>
+            <![CDATA[
+class ShortMethod
+{
+    public void A(int index) // Violation
+    {
+    }
+}
+]]>
+        </example>
+    </rule>
+
+    <rule name="ConstantNamingConventions"
+          since="0.2"
+          message="Constant {0} should be defined in PascalCase"
+          class="PHPMD\Rule\Naming\ConstantNamingConventions"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#constantnamingconventions">
+        <description>
+Class/interface constant names should follow the configured naming convention.
+The default convention is PascalCase (C# idiomatic). Set convention=upper for
+ALL_CAPS (UPPER_CASE) style as used in phpmd/Java.
+        </description>
+        <priority>4</priority>
+        <properties>
+            <property name="convention" description="Naming convention: pascal (default, PascalCase) or upper (ALL_CAPS)" value="pascal"/>
+        </properties>
+        <example>
+            <![CDATA[
+class Foo
+{
+    const int MyNum = 0;    // ok (PascalCase)
+    const string myTest = ""; // fail
+}
+]]>
+        </example>
+    </rule>
+
+    <rule name="BooleanGetMethodName"
+          since="0.2"
+          message="The '{0}()' method which returns a boolean should be named 'Is...()' or 'Has...()'"
+          class="PHPMD\Rule\Naming\BooleanGetMethodName"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#booleangetmethodname">
+        <description>
+Looks for methods named 'GetX()' with 'bool' as the return type. The convention
+in C# is to name these methods 'IsX()' or 'HasX()'.
+        </description>
+        <priority>4</priority>
+        <properties>
+            <property name="checkParameterizedMethods" value="false" description="Applies only to methods without parameters when set to true"/>
+        </properties>
+        <example>
+            <![CDATA[
+class Foo
+{
+    public bool GetFoo() { return true; } // bad
+    public bool IsFoo() { return true; }  // ok
+    public bool GetFoo(int bar) { return true; } // ok unless checkParameterizedMethods=true
+}
+]]>
+        </example>
+    </rule>
+
+    <!--
+    ConstructorWithNameAsEnclosingClass is OMITTED from the C# port.
+
+    In C#, a method with the same name as its enclosing class is a constructor
+    (pre-C# 1.0 style is simply invalid syntax in modern C#). A constructor
+    named identically to the class is a compile error in contemporary C#, so
+    this rule can never fire. It is retained in the XML catalog only as a
+    comment for traceability to the original phpmd rule set.
+
+    phpmd class: PHPMD\Rule\Naming\ConstructorWithNameAsEnclosingClass
+    phpmd message: Classes should not have a constructor method with the same name as the class
+    -->
+
+</ruleset>
