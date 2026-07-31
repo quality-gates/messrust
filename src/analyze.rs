@@ -1,4 +1,4 @@
-//! Syntax-only analysis for codesize, naming, and unusedcode rules.
+//! Syntax-only analysis for codesize, naming, unusedcode, and cleancode rules.
 
 use std::collections::{HashMap, HashSet};
 
@@ -37,6 +37,11 @@ pub enum RuleKind {
     UnusedLocalVariable,
     UnusedPrivateMethod,
     UnusedFormalParameter,
+    BooleanArgumentFlag,
+    ElseExpression,
+    IfStatementAssignment,
+    DuplicatedArrayKey,
+    StaticAccess,
 }
 
 const DEFAULT_CCN: usize = 10;
@@ -537,6 +542,111 @@ fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Ve
                 ));
             }
         }
+        RuleKind::BooleanArgumentFlag => {
+            let exceptions = property_list(rule, "exceptions");
+            let ignore = compile_phpmd_regex(
+                rule.properties
+                    .get("ignorepattern")
+                    .map(String::as_str)
+                    .unwrap_or(""),
+            );
+            for f in &model.functions {
+                if ignored_name(&ignore, &f.name) {
+                    continue;
+                }
+                if let Some(parent) = &f.parent {
+                    if exceptions.iter().any(|e| e == parent) {
+                        continue;
+                    }
+                }
+                let image = match &f.parent {
+                    Some(parent) => format!("{parent}::{}", f.name),
+                    None => f.name.clone(),
+                };
+                for p in &f.bool_params {
+                    if is_rust_unused_name(&p.name) {
+                        continue;
+                    }
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        p.begin_line,
+                        format_message(&rule.message, &[&image, &p.name]),
+                    ));
+                }
+            }
+        }
+        RuleKind::ElseExpression => {
+            for f in &model.functions {
+                let Some(body) = f.body else {
+                    continue;
+                };
+                for line in terminal_else_lines(body) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        line,
+                        format_message(&rule.message, &[&f.name]),
+                    ));
+                }
+            }
+        }
+        RuleKind::IfStatementAssignment => {
+            for f in &model.functions {
+                let Some(body) = f.body else {
+                    continue;
+                };
+                for pos in assignment_in_condition_positions(body) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        pos.line,
+                        format_message(
+                            &rule.message,
+                            &[&pos.line.to_string(), &pos.column.to_string()],
+                        ),
+                    ));
+                }
+            }
+        }
+        RuleKind::DuplicatedArrayKey => {
+            for dup in &model.duplicate_struct_keys {
+                out.push(name_violation(
+                    rule,
+                    file,
+                    dup.line,
+                    format_message(
+                        &rule.message,
+                        &[&dup.display, &dup.first_line.to_string()],
+                    ),
+                ));
+            }
+        }
+        RuleKind::StaticAccess => {
+            let exceptions = property_list(rule, "exceptions");
+            let ignore = compile_phpmd_regex(
+                rule.properties
+                    .get("ignorepattern")
+                    .map(String::as_str)
+                    .unwrap_or(""),
+            );
+            for f in &model.functions {
+                if ignored_name(&ignore, &f.name) {
+                    continue;
+                }
+                let Some(body) = f.body else {
+                    continue;
+                };
+                for access in static_accesses(body, f.parent.as_deref(), &exceptions) {
+                    out.push(name_violation(
+                        rule,
+                        file,
+                        access.line,
+                        format_message(&rule.message, &[&access.type_name, &f.name]),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -765,6 +875,233 @@ fn count_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>) 
         .count()
 }
 
+fn bool_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>) -> Vec<BoolParam> {
+    let mut out = Vec::new();
+    for arg in inputs {
+        let FnArg::Typed(PatType { pat, ty, .. }) = arg else {
+            continue;
+        };
+        if type_name_from_path(ty) != "bool" {
+            continue;
+        }
+        collect_bool_param_names(pat, &mut out);
+    }
+    out
+}
+
+fn collect_bool_param_names(pat: &Pat, out: &mut Vec<BoolParam>) {
+    match pat {
+        Pat::Ident(id) => out.push(BoolParam {
+            name: id.ident.to_string(),
+            begin_line: id.ident.span().start().line,
+        }),
+        Pat::Tuple(t) => {
+            for p in &t.elems {
+                collect_bool_param_names(p, out);
+            }
+        }
+        Pat::Paren(p) => collect_bool_param_names(&p.pat, out),
+        Pat::Reference(r) => collect_bool_param_names(&r.pat, out),
+        _ => {}
+    }
+}
+
+fn terminal_else_lines(body: &syn::Block) -> Vec<usize> {
+    let mut lines = Vec::new();
+    let mut visitor = ElseCollector { lines: &mut lines };
+    visitor.visit_block(body);
+    lines
+}
+
+struct ElseCollector<'a> {
+    lines: &'a mut Vec<usize>,
+}
+
+impl<'ast> Visit<'ast> for ElseCollector<'_> {
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        if let Some((_, else_branch)) = &node.else_branch {
+            if !matches!(else_branch.as_ref(), syn::Expr::If(_)) {
+                self.lines.push(else_branch.span().start().line);
+            }
+        }
+        syn::visit::visit_expr_if(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+fn assignment_in_condition_positions(body: &syn::Block) -> Vec<SourcePos> {
+    let mut positions = Vec::new();
+    let mut visitor = CondAssignCollector {
+        positions: &mut positions,
+    };
+    visitor.visit_block(body);
+    positions
+}
+
+struct CondAssignCollector<'a> {
+    positions: &'a mut Vec<SourcePos>,
+}
+
+impl CondAssignCollector<'_> {
+    fn scan_condition(&mut self, cond: &syn::Expr) {
+        if matches!(cond, syn::Expr::Let(_)) {
+            return;
+        }
+        let mut finder = AssignFinder {
+            positions: self.positions,
+        };
+        finder.visit_expr(cond);
+    }
+}
+
+impl<'ast> Visit<'ast> for CondAssignCollector<'_> {
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        self.scan_condition(&node.cond);
+        self.visit_block(&node.then_branch);
+        if let Some((_, else_branch)) = &node.else_branch {
+            self.visit_expr(else_branch);
+        }
+    }
+
+    fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
+        self.scan_condition(&node.cond);
+        self.visit_block(&node.body);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+struct AssignFinder<'a> {
+    positions: &'a mut Vec<SourcePos>,
+}
+
+impl<'ast> Visit<'ast> for AssignFinder<'_> {
+    fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
+        let start = node.span().start();
+        self.positions.push(SourcePos {
+            line: start.line,
+            column: start.column + 1,
+        });
+        syn::visit::visit_expr_assign(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+fn static_accesses(
+    body: &syn::Block,
+    parent: Option<&str>,
+    exceptions: &[String],
+) -> Vec<StaticAccessHit> {
+    let mut hits = Vec::new();
+    let mut visitor = StaticAccessCollector {
+        parent,
+        exceptions,
+        hits: &mut hits,
+    };
+    visitor.visit_block(body);
+    hits
+}
+
+struct StaticAccessCollector<'a> {
+    parent: Option<&'a str>,
+    exceptions: &'a [String],
+    hits: &'a mut Vec<StaticAccessHit>,
+}
+
+impl StaticAccessCollector<'_> {
+    fn consider_path(&mut self, path: &syn::Path, line: usize) {
+        let Some(type_name) = static_receiver_type(path) else {
+            return;
+        };
+        if type_name == "Self" {
+            return;
+        }
+        if self.parent == Some(type_name.as_str()) {
+            return;
+        }
+        if self.exceptions.iter().any(|e| e == &type_name) {
+            return;
+        }
+        self.hits.push(StaticAccessHit { type_name, line });
+    }
+}
+
+impl<'ast> Visit<'ast> for StaticAccessCollector<'_> {
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = &*node.func {
+            self.consider_path(&p.path, p.span().start().line);
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
+    fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
+    fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+fn static_receiver_type(path: &syn::Path) -> Option<String> {
+    if path.segments.len() < 2 {
+        return None;
+    }
+    // Prefer the rightmost PascalCase segment before the final call name.
+    let mut segs: Vec<_> = path.segments.iter().collect();
+    segs.pop()?; // method / associated fn name
+    for seg in segs.into_iter().rev() {
+        let name = seg.ident.to_string();
+        if name == "Self" {
+            return Some(name);
+        }
+        if name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
+        {
+            return Some(name);
+        }
+    }
+    None
+}
+
+#[derive(Default)]
+struct DuplicateKeyCollector {
+    keys: Vec<DuplicateKey>,
+}
+
+impl<'ast> Visit<'ast> for DuplicateKeyCollector {
+    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        for field in &node.fields {
+            let Member::Named(ident) = &field.member else {
+                continue;
+            };
+            let name = ident.to_string();
+            let line = ident.span().start().line;
+            if let Some(first) = seen.get(&name) {
+                self.keys.push(DuplicateKey {
+                    display: name,
+                    line,
+                    first_line: *first,
+                });
+            } else {
+                seen.insert(name, line);
+            }
+        }
+        syn::visit::visit_expr_struct(self, node);
+    }
+}
+
 fn field_stats(fields: &Fields) -> (usize, usize) {
     match fields {
         Fields::Named(n) => {
@@ -806,12 +1143,34 @@ struct NamedBinding {
     is_loop_binder: bool,
 }
 
+struct BoolParam {
+    name: String,
+    begin_line: usize,
+}
+
+struct SourcePos {
+    line: usize,
+    column: usize,
+}
+
+struct DuplicateKey {
+    display: String,
+    line: usize,
+    first_line: usize,
+}
+
+struct StaticAccessHit {
+    type_name: String,
+    line: usize,
+}
+
 struct FnModel<'a> {
     name: String,
     parent: Option<String>,
     begin_line: usize,
     end_line: usize,
     param_count: usize,
+    bool_params: Vec<BoolParam>,
     body: Option<&'a syn::Block>,
     returns_bool: bool,
 }
@@ -851,6 +1210,7 @@ struct FileModel<'a> {
     variables: Vec<NamedBinding>,
     constants: Vec<NamedBinding>,
     usage: UseDefModel,
+    duplicate_struct_keys: Vec<DuplicateKey>,
 }
 
 struct UseDefModel {
@@ -885,6 +1245,9 @@ impl<'a> FileModel<'a> {
         let mut usage = UseDefCollector::new();
         usage.visit_file(file);
 
+        let mut dup = DuplicateKeyCollector::default();
+        dup.visit_file(file);
+
         let mut types: Vec<_> = types.into_values().collect();
         types.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
         functions.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
@@ -895,6 +1258,7 @@ impl<'a> FileModel<'a> {
             variables: binder.variables,
             constants: binder.constants,
             usage: usage.into_model(),
+            duplicate_struct_keys: dup.keys,
         }
     }
 }
@@ -1379,6 +1743,7 @@ fn insert_trait<'a>(
                 begin_line: begin,
                 end_line: end,
                 param_count: count_params(&m.sig.inputs),
+                bool_params: bool_params(&m.sig.inputs),
                 body,
                 returns_bool: returns_bool(&m.sig.output),
             });
@@ -1413,6 +1778,7 @@ fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
         begin_line: f.sig.fn_token.span().start().line,
         end_line: f.span().end().line,
         param_count: count_params(&f.sig.inputs),
+        bool_params: bool_params(&f.sig.inputs),
         body: Some(&f.block),
         returns_bool: returns_bool(&f.sig.output),
     }
@@ -1456,6 +1822,7 @@ fn attach_impl<'a>(
                 begin_line: begin,
                 end_line: end,
                 param_count: count_params(&m.sig.inputs),
+                bool_params: bool_params(&m.sig.inputs),
                 body: Some(&m.block),
                 returns_bool: returns_bool(&m.sig.output),
             });

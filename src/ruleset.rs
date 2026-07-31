@@ -242,6 +242,11 @@ fn resolve_kind(class: &str) -> Option<RuleKind> {
         "PHPMD\\Rule\\UnusedLocalVariable" => Some(RuleKind::UnusedLocalVariable),
         "PHPMD\\Rule\\UnusedPrivateMethod" => Some(RuleKind::UnusedPrivateMethod),
         "PHPMD\\Rule\\UnusedFormalParameter" => Some(RuleKind::UnusedFormalParameter),
+        "PHPMD\\Rule\\CleanCode\\BooleanArgumentFlag" => Some(RuleKind::BooleanArgumentFlag),
+        "PHPMD\\Rule\\CleanCode\\ElseExpression" => Some(RuleKind::ElseExpression),
+        "PHPMD\\Rule\\CleanCode\\IfStatementAssignment" => Some(RuleKind::IfStatementAssignment),
+        "PHPMD\\Rule\\CleanCode\\DuplicatedArrayKey" => Some(RuleKind::DuplicatedArrayKey),
+        "PHPMD\\Rule\\CleanCode\\StaticAccess" => Some(RuleKind::StaticAccess),
         _ => None,
     }
 }
