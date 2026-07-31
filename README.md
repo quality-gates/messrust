@@ -11,9 +11,12 @@ quality-gates mess detectors.
 
 ## Status
 
-CLI, report formats, ruleset loading, and the full `codesize` rule catalog are
-in place. Other component rulesets still load as stubs until later tickets.
+CLI, report formats, ruleset loading, and the full `codesize` and `naming` rule
+catalogs are in place. Other component rulesets still load as stubs until later
+tickets.
 
 Complexity metrics follow the quality-gates phpmd 2.15.0 pins; see
-[docs/codesize-metrics.md](docs/codesize-metrics.md) for Rust adaptations.
+[docs/codesize-metrics.md](docs/codesize-metrics.md). Naming adaptations
+(including the `ConstructorWithNameAsEnclosingClass` no-op) are in
+[docs/naming-adaptations.md](docs/naming-adaptations.md).
 
