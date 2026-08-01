@@ -72,6 +72,56 @@ fn unused_local_variable_skips_underscore_names() {
 }
 
 #[test]
+fn unused_local_variable_does_not_treat_enum_variants_as_bindings() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "variant.rs",
+        "fn f(value: Option<i32>) {\n    match value {\n        Some(number) => { let _ = number; }\n        None => {}\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_variable_counts_rust_format_capture_as_a_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "format_capture.rs",
+        "fn f() -> String {\n    let error = \"bad\";\n    format!(\"failure: {error}\")\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_variable_counts_assignment_index_as_a_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "assignment_index.rs",
+        "fn f(values: &mut [i32]) {\n    let index = 0;\n    values[index] = 1;\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_variable_does_not_count_destructuring_targets_as_reads() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "destructuring_assignment.rs",
+        "fn f() {\n    let left;\n    let right;\n    (left, right) = (1, 2);\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert!(out.contains("left"), "stdout={out:?}");
+    assert!(out.contains("right"), "stdout={out:?}");
+}
+
+#[test]
 fn unused_local_variable_honours_exceptions() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "ex.rs", "fn f() {\n    let allowed = 1;\n}\n");
@@ -143,6 +193,18 @@ fn unused_private_field_skips_pub_fields() {
         dir.path(),
         "pubf.rs",
         "pub struct S {\n    pub exposed: i32,\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedPrivateField");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_skips_fields_used_by_serialization_derives() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "serialized.rs",
+        "#[derive(Serialize)]\nstruct Report {\n    message: String,\n}\n",
     );
     let (code, out, err) = run_only(&path, "UnusedPrivateField");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");

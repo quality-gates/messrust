@@ -11,8 +11,6 @@
 //! - `match` arms map to phpmd/pdepend switch case labels; a lone `_` arm is
 //!   the default and does not increment CCN (same as Go `default`).
 //! - `for` maps to phpmd foreach / Go range for NPath (`E(iter) + 1 + NP(body)`).
-// messrust-disable UnusedLocalVariable,CamelCaseVariableName
-
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{BinOp, Block, Expr, ExprIf, Pat, Stmt};
@@ -110,33 +108,42 @@ fn npath_stmt(stmt: &Stmt) -> usize {
     }
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn npath_expr_stmt(expr: &Expr) -> usize {
+    npath_control_flow(expr)
+        .or_else(|| npath_block_expression(expr))
+        .or_else(|| npath_return_expression(expr))
+        .unwrap_or(1)
+}
+
+fn npath_control_flow(expr: &Expr) -> Option<usize> {
     match expr {
-        Expr::If(i) => npath_if(i),
-        Expr::Match(m) => npath_match(m),
-        Expr::ForLoop(f) => {
-            expression_complexity(&f.expr) + 1 + npath_block(&f.body)
+        Expr::If(node) => Some(npath_if(node)),
+        Expr::Match(node) => Some(npath_match(node)),
+        Expr::ForLoop(node) => {
+            Some(expression_complexity(&node.expr) + 1 + npath_block(&node.body))
         }
-        Expr::While(w) => expression_complexity(&w.cond) + 1 + npath_block(&w.body),
-        Expr::Loop(l) => 1 + npath_block(&l.body),
-        Expr::Block(b) => npath_block(&b.block),
-        Expr::Return(r) => match &r.expr {
-            None => 1,
-            Some(e) => {
-                let c = expression_complexity(e);
-                if c == 0 {
-                    1
-                } else {
-                    c
-                }
-            }
-        },
-        Expr::Async(a) => npath_block(&a.block),
-        Expr::TryBlock(t) => npath_block(&t.block),
-        Expr::Unsafe(u) => npath_block(&u.block),
-        _ => 1,
+        Expr::While(node) => Some(expression_complexity(&node.cond) + 1 + npath_block(&node.body)),
+        Expr::Loop(node) => Some(1 + npath_block(&node.body)),
+        _ => None,
     }
+}
+
+fn npath_block_expression(expr: &Expr) -> Option<usize> {
+    match expr {
+        Expr::Block(node) => Some(npath_block(&node.block)),
+        Expr::Async(node) => Some(npath_block(&node.block)),
+        Expr::TryBlock(node) => Some(npath_block(&node.block)),
+        Expr::Unsafe(node) => Some(npath_block(&node.block)),
+        _ => None,
+    }
+}
+
+fn npath_return_expression(expr: &Expr) -> Option<usize> {
+    let Expr::Return(node) = expr else {
+        return None;
+    };
+    let complexity = node.expr.as_deref().map(expression_complexity).unwrap_or(0);
+    Some(complexity.max(1))
 }
 
 fn npath_if(node: &ExprIf) -> usize {
@@ -217,35 +224,41 @@ pub fn effective_lines_of_code(src: &str, start_line: usize, end_line: usize) ->
     count
 }
 
-// messrust-disable-next-line CyclomaticComplexity
-fn line_has_code(line: &str, mut in_block: bool) -> (bool, bool) {
-    let bytes = line.as_bytes();
-    let mut has_code = false;
-    let mut i = 0;
-    while i < bytes.len() {
-        if in_block {
-            if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-                in_block = false;
-                i += 2;
-                continue;
-            }
-            i += 1;
-            continue;
-        }
-        if bytes[i] == b'/' && i + 1 < bytes.len() {
-            if bytes[i + 1] == b'/' {
-                return (has_code, false);
-            }
-            if bytes[i + 1] == b'*' {
-                in_block = true;
-                i += 2;
-                continue;
-            }
-        }
-        if bytes[i] != b' ' && bytes[i] != b'\t' && bytes[i] != b'\r' {
-            has_code = true;
-        }
-        i += 1;
+fn line_has_code(line: &str, in_block: bool) -> (bool, bool) {
+    if !in_block {
+        return scan_visible_line(line);
     }
-    (has_code, in_block)
+    match line.find("*/") {
+        Some(end) => scan_visible_line(&line[end + 2..]),
+        None => (false, true),
+    }
+}
+
+fn scan_visible_line(line: &str) -> (bool, bool) {
+    let line_comment = line.find("//");
+    let block_comment = line.find("/*");
+    if line_comment
+        .is_some_and(|line_pos| block_comment.is_none_or(|block_pos| line_pos < block_pos))
+    {
+        let visible = &line[..line_comment.unwrap()];
+        return (contains_code(visible), false);
+    }
+    let Some(start) = block_comment else {
+        return (contains_code(line), false);
+    };
+    let before_has_code = contains_code(&line[..start]);
+    let after_start = start + 2;
+    match line[after_start..].find("*/") {
+        Some(relative_end) => {
+            let (after_has_code, in_block) =
+                scan_visible_line(&line[after_start + relative_end + 2..]);
+            (before_has_code || after_has_code, in_block)
+        }
+        None => (before_has_code, true),
+    }
+}
+
+fn contains_code(text: &str) -> bool {
+    text.bytes()
+        .any(|byte| !matches!(byte, b' ' | b'\t' | b'\r'))
 }

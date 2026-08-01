@@ -134,7 +134,6 @@ fn append_rule(
     Ok(())
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn add_ref(
     out: &mut Vec<LoadedRule>,
     xr: &XmlRule,
@@ -142,40 +141,70 @@ fn add_ref(
     warn: &mut dyn FnMut(String),
 ) -> Result<(), String> {
     let (base, rule_name) = split_ref(&xr.ref_path);
-    let (xml, _) = match read_ruleset(&base) {
-        Ok(v) => v,
-        Err(_) => {
-            warn(format!("Cannot resolve ref: {}", xr.ref_path));
-            return Ok(());
-        }
+    let Some(src) = read_referenced_ruleset(&base, &xr.ref_path, warn)? else {
+        return Ok(());
     };
-    let src = parse_ruleset(&xml)?;
-    let excluded: HashSet<&str> = xr.excludes.iter().map(String::as_str).collect();
     let src_name = if src.name.is_empty() {
         base
     } else {
         src.name.clone()
     };
-    for sr in &src.rules {
-        if sr.class.is_empty() {
+    if !rule_name.is_empty() {
+        add_named_rule(out, &src, &src_name, &rule_name, xr, opts, warn);
+        return Ok(());
+    }
+    add_ruleset_rules(out, &src, &src_name, xr, opts, warn);
+    Ok(())
+}
+
+fn read_referenced_ruleset(
+    base: &str,
+    reference: &str,
+    warn: &mut dyn FnMut(String),
+) -> Result<Option<XmlRuleset>, String> {
+    match read_ruleset(base) {
+        Ok((xml, _)) => parse_ruleset(&xml).map(Some),
+        Err(_) => {
+            warn(format!("Cannot resolve ref: {reference}"));
+            Ok(None)
+        }
+    }
+}
+
+fn add_named_rule(
+    out: &mut Vec<LoadedRule>,
+    source: &XmlRuleset,
+    source_name: &str,
+    rule_name: &str,
+    override_rule: &XmlRule,
+    opts: &LoadOptions,
+    warn: &mut dyn FnMut(String),
+) {
+    let Some(source_rule) = source.rules.iter().find(|rule| rule.name == rule_name) else {
+        return;
+    };
+    if let Some(rule) = build_rule(source_name, source_rule, override_rule, opts, warn) {
+        out.push(rule);
+    }
+}
+
+fn add_ruleset_rules(
+    out: &mut Vec<LoadedRule>,
+    source: &XmlRuleset,
+    source_name: &str,
+    override_rule: &XmlRule,
+    opts: &LoadOptions,
+    warn: &mut dyn FnMut(String),
+) {
+    let excluded: HashSet<&str> = override_rule.excludes.iter().map(String::as_str).collect();
+    for source_rule in &source.rules {
+        if source_rule.class.is_empty() || excluded.contains(source_rule.name.as_str()) {
             continue;
         }
-        if !rule_name.is_empty() {
-            if sr.name == rule_name {
-                if let Some(rule) = build_rule(&src_name, sr, xr, opts, warn) {
-                    out.push(rule);
-                }
-            }
-            continue;
-        }
-        if excluded.contains(sr.name.as_str()) {
-            continue;
-        }
-        if let Some(rule) = build_rule(&src_name, sr, sr, opts, warn) {
+        if let Some(rule) = build_rule(source_name, source_rule, source_rule, opts, warn) {
             out.push(rule);
         }
     }
-    Ok(())
 }
 
 fn build_rule(
@@ -218,59 +247,168 @@ fn build_rule(
     })
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn resolve_kind(class: &str) -> Option<RuleKind> {
-    match class {
-        "PHPMD\\Rule\\CyclomaticComplexity" => Some(RuleKind::CyclomaticComplexity),
-        "PHPMD\\Rule\\Design\\NpathComplexity" => Some(RuleKind::NPathComplexity),
-        "PHPMD\\Rule\\Design\\LongMethod" => Some(RuleKind::ExcessiveMethodLength),
-        "PHPMD\\Rule\\Design\\LongClass" => Some(RuleKind::ExcessiveClassLength),
-        "PHPMD\\Rule\\Design\\LongParameterList" => Some(RuleKind::ExcessiveParameterList),
-        "PHPMD\\Rule\\ExcessivePublicCount" => Some(RuleKind::ExcessivePublicCount),
-        "PHPMD\\Rule\\Design\\TooManyFields" => Some(RuleKind::TooManyFields),
-        "PHPMD\\Rule\\Design\\TooManyMethods" => Some(RuleKind::TooManyMethods),
-        "PHPMD\\Rule\\Design\\TooManyPublicMethods" => Some(RuleKind::TooManyPublicMethods),
-        "PHPMD\\Rule\\Design\\WeightedMethodCount" => Some(RuleKind::ExcessiveClassComplexity),
-        "PHPMD\\Rule\\Naming\\ShortClassName" => Some(RuleKind::ShortClassName),
-        "PHPMD\\Rule\\Naming\\LongClassName" => Some(RuleKind::LongClassName),
-        "PHPMD\\Rule\\Naming\\ShortVariable" => Some(RuleKind::ShortVariable),
-        "PHPMD\\Rule\\Naming\\LongVariable" => Some(RuleKind::LongVariable),
-        "PHPMD\\Rule\\Naming\\ShortMethodName" => Some(RuleKind::ShortMethodName),
-        "PHPMD\\Rule\\Naming\\ConstantNamingConventions" => {
-            Some(RuleKind::ConstantNamingConventions)
-        }
-        "PHPMD\\Rule\\Naming\\BooleanGetMethodName" => Some(RuleKind::BooleanGetMethodName),
-        "PHPMD\\Rule\\UnusedPrivateField" => Some(RuleKind::UnusedPrivateField),
-        "PHPMD\\Rule\\UnusedLocalVariable" => Some(RuleKind::UnusedLocalVariable),
-        "PHPMD\\Rule\\UnusedPrivateMethod" => Some(RuleKind::UnusedPrivateMethod),
-        "PHPMD\\Rule\\UnusedFormalParameter" => Some(RuleKind::UnusedFormalParameter),
-        "PHPMD\\Rule\\CleanCode\\BooleanArgumentFlag" => Some(RuleKind::BooleanArgumentFlag),
-        "PHPMD\\Rule\\CleanCode\\ElseExpression" => Some(RuleKind::ElseExpression),
-        "PHPMD\\Rule\\CleanCode\\IfStatementAssignment" => Some(RuleKind::IfStatementAssignment),
-        "PHPMD\\Rule\\CleanCode\\DuplicatedArrayKey" => Some(RuleKind::DuplicatedArrayKey),
-        "PHPMD\\Rule\\CleanCode\\StaticAccess" => Some(RuleKind::StaticAccess),
-        "PHPMD\\Rule\\Design\\ExitExpression" => Some(RuleKind::ExitExpression),
-        "PHPMD\\Rule\\Design\\GotoStatement" => Some(RuleKind::GotoStatement),
-        "PHPMD\\Rule\\Design\\CountInLoopExpression" => Some(RuleKind::CountInLoopExpression),
-        "PHPMD\\Rule\\Design\\DevelopmentCodeFragment" => Some(RuleKind::DevelopmentCodeFragment),
-        "PHPMD\\Rule\\Design\\EmptyCatchBlock" => Some(RuleKind::EmptyCatchBlock),
-        "PHPMD\\Rule\\Design\\CouplingBetweenObjects" => Some(RuleKind::CouplingBetweenObjects),
-        "PHPMD\\Rule\\Design\\GlobalVariable" => Some(RuleKind::GlobalVariable),
-        "PHPMD\\Rule\\Design\\LackOfCohesionOfMethods" => Some(RuleKind::LackOfCohesionOfMethods),
-        "PHPMD\\Rule\\Controversial\\CamelCaseClassName" => Some(RuleKind::CamelCaseClassName),
-        "PHPMD\\Rule\\Controversial\\CamelCaseMethodName" => Some(RuleKind::CamelCaseMethodName),
-        "PHPMD\\Rule\\Controversial\\CamelCasePropertyName" => {
-            Some(RuleKind::CamelCasePropertyName)
-        }
-        "PHPMD\\Rule\\Controversial\\CamelCaseParameterName" => {
-            Some(RuleKind::CamelCaseParameterName)
-        }
-        "PHPMD\\Rule\\Controversial\\CamelCaseVariableName" => {
-            Some(RuleKind::CamelCaseVariableName)
-        }
-        _ => None,
-    }
+    RULE_KINDS
+        .iter()
+        .find(|(known_class, _)| *known_class == class)
+        .map(|(_, kind)| *kind)
 }
+
+const RULE_KINDS: &[(&str, RuleKind)] = &[
+    (
+        "PHPMD\\Rule\\CyclomaticComplexity",
+        RuleKind::CyclomaticComplexity,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\NpathComplexity",
+        RuleKind::NPathComplexity,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\LongMethod",
+        RuleKind::ExcessiveMethodLength,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\LongClass",
+        RuleKind::ExcessiveClassLength,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\LongParameterList",
+        RuleKind::ExcessiveParameterList,
+    ),
+    (
+        "PHPMD\\Rule\\ExcessivePublicCount",
+        RuleKind::ExcessivePublicCount,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\TooManyFields",
+        RuleKind::TooManyFields,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\TooManyMethods",
+        RuleKind::TooManyMethods,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\TooManyPublicMethods",
+        RuleKind::TooManyPublicMethods,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\WeightedMethodCount",
+        RuleKind::ExcessiveClassComplexity,
+    ),
+    (
+        "PHPMD\\Rule\\Naming\\ShortClassName",
+        RuleKind::ShortClassName,
+    ),
+    (
+        "PHPMD\\Rule\\Naming\\LongClassName",
+        RuleKind::LongClassName,
+    ),
+    (
+        "PHPMD\\Rule\\Naming\\ShortVariable",
+        RuleKind::ShortVariable,
+    ),
+    ("PHPMD\\Rule\\Naming\\LongVariable", RuleKind::LongVariable),
+    (
+        "PHPMD\\Rule\\Naming\\ShortMethodName",
+        RuleKind::ShortMethodName,
+    ),
+    (
+        "PHPMD\\Rule\\Naming\\ConstantNamingConventions",
+        RuleKind::ConstantNamingConventions,
+    ),
+    (
+        "PHPMD\\Rule\\Naming\\BooleanGetMethodName",
+        RuleKind::BooleanGetMethodName,
+    ),
+    (
+        "PHPMD\\Rule\\UnusedPrivateField",
+        RuleKind::UnusedPrivateField,
+    ),
+    (
+        "PHPMD\\Rule\\UnusedLocalVariable",
+        RuleKind::UnusedLocalVariable,
+    ),
+    (
+        "PHPMD\\Rule\\UnusedPrivateMethod",
+        RuleKind::UnusedPrivateMethod,
+    ),
+    (
+        "PHPMD\\Rule\\UnusedFormalParameter",
+        RuleKind::UnusedFormalParameter,
+    ),
+    (
+        "PHPMD\\Rule\\CleanCode\\BooleanArgumentFlag",
+        RuleKind::BooleanArgumentFlag,
+    ),
+    (
+        "PHPMD\\Rule\\CleanCode\\ElseExpression",
+        RuleKind::ElseExpression,
+    ),
+    (
+        "PHPMD\\Rule\\CleanCode\\IfStatementAssignment",
+        RuleKind::IfStatementAssignment,
+    ),
+    (
+        "PHPMD\\Rule\\CleanCode\\DuplicatedArrayKey",
+        RuleKind::DuplicatedArrayKey,
+    ),
+    (
+        "PHPMD\\Rule\\CleanCode\\StaticAccess",
+        RuleKind::StaticAccess,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\ExitExpression",
+        RuleKind::ExitExpression,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\GotoStatement",
+        RuleKind::GotoStatement,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\CountInLoopExpression",
+        RuleKind::CountInLoopExpression,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\DevelopmentCodeFragment",
+        RuleKind::DevelopmentCodeFragment,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\EmptyCatchBlock",
+        RuleKind::EmptyCatchBlock,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\CouplingBetweenObjects",
+        RuleKind::CouplingBetweenObjects,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\GlobalVariable",
+        RuleKind::GlobalVariable,
+    ),
+    (
+        "PHPMD\\Rule\\Design\\LackOfCohesionOfMethods",
+        RuleKind::LackOfCohesionOfMethods,
+    ),
+    (
+        "PHPMD\\Rule\\Controversial\\CamelCaseClassName",
+        RuleKind::CamelCaseClassName,
+    ),
+    (
+        "PHPMD\\Rule\\Controversial\\CamelCaseMethodName",
+        RuleKind::CamelCaseMethodName,
+    ),
+    (
+        "PHPMD\\Rule\\Controversial\\CamelCasePropertyName",
+        RuleKind::CamelCasePropertyName,
+    ),
+    (
+        "PHPMD\\Rule\\Controversial\\CamelCaseParameterName",
+        RuleKind::CamelCaseParameterName,
+    ),
+    (
+        "PHPMD\\Rule\\Controversial\\CamelCaseVariableName",
+        RuleKind::CamelCaseVariableName,
+    ),
+];
 
 fn read_ruleset(ident: &str) -> Result<(String, String), String> {
     if let Some((xml, name)) = builtin_xml(ident) {
@@ -302,10 +440,7 @@ fn builtin_xml(ident: &str) -> Option<(&'static str, &'static str)> {
             "controversial",
         )),
         "rust" => Some((include_str!("../rulesets/rust.xml"), "rust")),
-        "opinionated" => Some((
-            include_str!("../rulesets/opinionated.xml"),
-            "opinionated",
-        )),
+        "opinionated" => Some((include_str!("../rulesets/opinionated.xml"), "opinionated")),
         _ => None,
     }
 }
@@ -318,17 +453,8 @@ fn normalize_builtin_key(ident: &str) -> Option<String> {
         .unwrap_or(&lower);
     let stem = base.strip_suffix(".xml").unwrap_or(base);
     match stem {
-        "codesize"
-        | "naming"
-        | "unusedcode"
-        | "cleancode"
-        | "design"
-        | "controversial"
-        | "rust"
-        | "opinionated" =>
-        {
-            Some(stem.to_string())
-        }
+        "codesize" | "naming" | "unusedcode" | "cleancode" | "design" | "controversial"
+        | "rust" | "opinionated" => Some(stem.to_string()),
         _ => None,
     }
 }
@@ -366,7 +492,6 @@ fn parse_ruleset(xml: &str) -> Result<XmlRuleset, String> {
     Ok(XmlRuleset { name, rules })
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn parse_rule(node: roxmltree::Node<'_, '_>) -> XmlRule {
     let mut rule = XmlRule {
         name: node.attribute("name").unwrap_or("").to_string(),
@@ -378,38 +503,51 @@ fn parse_rule(node: roxmltree::Node<'_, '_>) -> XmlRule {
         excludes: Vec::new(),
     };
     for child in node.children().filter(|n| n.is_element()) {
-        match child.tag_name().name() {
-            "priority" => {
-                if let Ok(p) = child.text().unwrap_or("").trim().parse::<u8>() {
-                    rule.priority = Some(p);
-                }
-            }
-            "properties" => {
-                for prop in child.children().filter(|n| n.is_element()) {
-                    if prop.tag_name().name() != "property" {
-                        continue;
-                    }
-                    let pname = prop.attribute("name").unwrap_or("").to_string();
-                    let mut value = prop.attribute("value").unwrap_or("").to_string();
-                    if value.is_empty() {
-                        for v in prop.children().filter(|n| n.is_element()) {
-                            if v.tag_name().name() == "value" {
-                                value = v.text().unwrap_or("").trim().to_string();
-                            }
-                        }
-                    }
-                    if !pname.is_empty() {
-                        rule.properties.insert(pname, value);
-                    }
-                }
-            }
-            "exclude" => {
-                if let Some(n) = child.attribute("name") {
-                    rule.excludes.push(n.to_string());
-                }
-            }
-            _ => {}
-        }
+        parse_rule_child(&mut rule, child);
     }
     rule
+}
+
+fn parse_rule_child(rule: &mut XmlRule, child: roxmltree::Node<'_, '_>) {
+    match child.tag_name().name() {
+        "priority" => {
+            if let Ok(priority) = child.text().unwrap_or("").trim().parse::<u8>() {
+                rule.priority = Some(priority);
+            }
+        }
+        "properties" => parse_properties(rule, child),
+        "exclude" => {
+            if let Some(name) = child.attribute("name") {
+                rule.excludes.push(name.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_properties(rule: &mut XmlRule, properties: roxmltree::Node<'_, '_>) {
+    for property in properties.children().filter(|node| node.is_element()) {
+        if property.tag_name().name() != "property" {
+            continue;
+        }
+        let name = property.attribute("name").unwrap_or("");
+        if !name.is_empty() {
+            rule.properties
+                .insert(name.to_string(), property_value(property));
+        }
+    }
+}
+
+fn property_value(property: roxmltree::Node<'_, '_>) -> String {
+    let attribute = property.attribute("value").unwrap_or("");
+    if !attribute.is_empty() {
+        return attribute.to_string();
+    }
+    property
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "value")
+        .and_then(|node| node.text())
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }

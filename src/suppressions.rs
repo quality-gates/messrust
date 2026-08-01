@@ -1,5 +1,4 @@
 //! Source comment directives for suppressing individual findings.
-// messrust-disable UnusedLocalVariable
 
 use std::collections::{HashMap, HashSet};
 
@@ -24,7 +23,6 @@ pub struct Suppressions {
 }
 
 impl Suppressions {
-    // messrust-disable-next-line CyclomaticComplexity
     pub fn from_source(source: &str) -> Self {
         let directives = scan_directives(source);
         let line_count = source.lines().count().max(1);
@@ -33,13 +31,7 @@ impl Suppressions {
         let mut by_line = HashMap::new();
 
         for line in 1..=line_count {
-            for directive in directives.iter().filter(|d| d.line == line) {
-                if directive.kind == DirectiveKind::Enable {
-                    for rule in &directive.rules {
-                        active.remove(rule);
-                    }
-                }
-            }
+            apply_enables(&directives, line, &mut active);
 
             let mut suppressed = active.clone();
             if let Some(rules) = next_line.remove(&line) {
@@ -49,18 +41,7 @@ impl Suppressions {
                 by_line.insert(line, suppressed);
             }
 
-            for directive in directives.iter().filter(|d| d.line == line) {
-                match directive.kind {
-                    DirectiveKind::Disable => active.extend(directive.rules.iter().cloned()),
-                    DirectiveKind::DisableNextLine => {
-                        next_line
-                            .entry(line + 1)
-                            .or_default()
-                            .extend(directive.rules.iter().cloned());
-                    }
-                    DirectiveKind::Enable => {}
-                }
-            }
+            apply_disables(&directives, line, &mut active, &mut next_line);
         }
 
         Self { by_line }
@@ -73,62 +54,155 @@ impl Suppressions {
     }
 }
 
-// messrust-disable-next-line CyclomaticComplexity
-fn scan_directives(source: &str) -> Vec<Directive> {
-    let mut directives = Vec::new();
-    let bytes = source.as_bytes();
-    let mut index = 0;
-    let mut line = 1;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'/' if bytes.get(index + 1) == Some(&b'/') => {
-                let start = index + 2;
-                let mut end = start;
-                while end < bytes.len() && bytes[end] != b'\n' {
-                    end += 1;
-                }
-                add_directive(&mut directives, line, &source[start..end]);
-                index = end;
-            }
-            b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                let (end, comment) = scan_block_comment(source, index + 2);
-                for (offset, text) in comment.lines().enumerate() {
-                    add_directive(&mut directives, line + offset, text);
-                }
-                line += comment.bytes().filter(|b| *b == b'\n').count();
-                index = end;
-            }
-            b'\n' => {
-                line += 1;
-                index += 1;
-            }
-            b'"' => {
-                let end = skip_quoted(bytes, index + 1, b'"');
-                line += newline_count(&bytes[index..end]);
-                index = end;
-            }
-            b'\'' => {
-                let end = if looks_like_char_literal(bytes, index) {
-                    skip_quoted(bytes, index + 1, b'\'')
-                } else {
-                    index + 1
-                };
-                line += newline_count(&bytes[index..end]);
-                index = end;
-            }
-            b'r' | b'b' => {
-                if let Some(end) = skip_raw_or_byte_string(bytes, index) {
-                    line += newline_count(&bytes[index..end]);
-                    index = end;
-                } else {
-                    index += 1;
-                }
-            }
-            _ => index += 1,
+fn apply_enables(directives: &[Directive], line: usize, active: &mut HashSet<String>) {
+    for directive in directives
+        .iter()
+        .filter(|directive| directive.line == line && directive.kind == DirectiveKind::Enable)
+    {
+        for rule in &directive.rules {
+            active.remove(rule);
         }
     }
-    directives
+}
+
+fn apply_disables(
+    directives: &[Directive],
+    line: usize,
+    active: &mut HashSet<String>,
+    next_line: &mut HashMap<usize, HashSet<String>>,
+) {
+    for directive in directives.iter().filter(|directive| directive.line == line) {
+        match directive.kind {
+            DirectiveKind::Disable => active.extend(directive.rules.iter().cloned()),
+            DirectiveKind::DisableNextLine => next_line
+                .entry(line + 1)
+                .or_default()
+                .extend(directive.rules.iter().cloned()),
+            DirectiveKind::Enable => {}
+        }
+    }
+}
+
+fn scan_directives(source: &str) -> Vec<Directive> {
+    DirectiveScanner::new(source).scan()
+}
+
+struct DirectiveScanner<'a> {
+    source: &'a str,
+    index: usize,
+    line: usize,
+    directives: Vec<Directive>,
+}
+
+enum SourceToken {
+    LineComment,
+    BlockComment,
+    Newline,
+    String,
+    Character,
+    PossibleRawString,
+    Other,
+}
+
+impl<'a> DirectiveScanner<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            index: 0,
+            line: 1,
+            directives: Vec::new(),
+        }
+    }
+
+    fn scan(mut self) -> Vec<Directive> {
+        while self.index < self.source.len() {
+            self.scan_next();
+        }
+        self.directives
+    }
+
+    fn scan_next(&mut self) {
+        match source_token(self.source.as_bytes(), self.index) {
+            SourceToken::LineComment => self.scan_line_comment(),
+            SourceToken::BlockComment => self.scan_block_comment(),
+            SourceToken::Newline => self.scan_newline(),
+            SourceToken::String => self.skip_quoted_string(b'"'),
+            SourceToken::Character => self.scan_character(),
+            SourceToken::PossibleRawString => self.scan_possible_raw_string(),
+            SourceToken::Other => self.index += 1,
+        }
+    }
+
+    fn scan_line_comment(&mut self) {
+        let start = self.index + 2;
+        let mut end = start;
+        while end < self.source.len() && self.source.as_bytes()[end] != b'\n' {
+            end += 1;
+        }
+        add_directive(&mut self.directives, self.line, &self.source[start..end]);
+        self.index = end;
+    }
+
+    fn scan_block_comment(&mut self) {
+        let (end, comment) = scan_block_comment(self.source, self.index + 2);
+        for (offset, text) in comment.lines().enumerate() {
+            add_directive(&mut self.directives, self.line + offset, text);
+        }
+        self.line += comment.bytes().filter(|byte| *byte == b'\n').count();
+        self.index = end;
+    }
+
+    fn scan_newline(&mut self) {
+        self.line += 1;
+        self.index += 1;
+    }
+
+    fn scan_character(&mut self) {
+        let bytes = self.source.as_bytes();
+        let end = if looks_like_char_literal(bytes, self.index) {
+            skip_quoted(bytes, self.index + 1, b'\'')
+        } else {
+            self.index + 1
+        };
+        self.line += newline_count(&bytes[self.index..end]);
+        self.index = end;
+    }
+
+    fn scan_possible_raw_string(&mut self) {
+        let bytes = self.source.as_bytes();
+        if let Some(end) = skip_raw_or_byte_string(bytes, self.index) {
+            self.line += newline_count(&bytes[self.index..end]);
+            self.index = end;
+        } else {
+            self.index += 1;
+        }
+    }
+
+    fn skip_quoted_string(&mut self, quote: u8) {
+        let bytes = self.source.as_bytes();
+        let end = skip_quoted(bytes, self.index + 1, quote);
+        self.line += newline_count(&bytes[self.index..end]);
+        self.index = end;
+    }
+}
+
+fn source_token(bytes: &[u8], index: usize) -> SourceToken {
+    match bytes[index] {
+        b'/' => slash_token(bytes, index),
+        b'\n' => SourceToken::Newline,
+        b'"' => SourceToken::String,
+        b'\'' => SourceToken::Character,
+        b'r' | b'b' => SourceToken::PossibleRawString,
+        _ => SourceToken::Other,
+    }
+}
+
+fn slash_token(bytes: &[u8], index: usize) -> SourceToken {
+    match bytes.get(index + 1) {
+        Some(b'/') => SourceToken::LineComment,
+        Some(b'*') => SourceToken::BlockComment,
+        _ => SourceToken::Other,
+    }
 }
 
 fn newline_count(bytes: &[u8]) -> usize {
@@ -239,22 +313,23 @@ fn looks_like_char_literal(bytes: &[u8], index: usize) -> bool {
     false
 }
 
-// messrust-disable-next-line CyclomaticComplexity,NPathComplexity
 fn skip_raw_or_byte_string(bytes: &[u8], index: usize) -> Option<usize> {
-    let mut quote = index;
-    if bytes[index] == b'b' {
-        if bytes.get(index + 1) != Some(&b'"') && bytes.get(index + 1) != Some(&b'r') {
-            return None;
-        }
-        quote += 1;
-    }
+    let quote = string_prefix_end(bytes, index)?;
     if bytes.get(quote) == Some(&b'"') {
         return Some(skip_quoted(bytes, quote + 1, b'"'));
     }
-    if bytes.get(quote) != Some(&b'r') {
-        return None;
+    skip_raw_string(bytes, quote + 1)
+}
+
+fn string_prefix_end(bytes: &[u8], index: usize) -> Option<usize> {
+    match bytes[index] {
+        b'r' => Some(index),
+        b'b' if matches!(bytes.get(index + 1), Some(b'"') | Some(b'r')) => Some(index + 1),
+        _ => None,
     }
-    quote += 1;
+}
+
+fn skip_raw_string(bytes: &[u8], quote: usize) -> Option<usize> {
     let mut hashes = 0;
     while bytes.get(quote + hashes) == Some(&b'#') {
         hashes += 1;

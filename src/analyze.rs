@@ -1,13 +1,10 @@
 //! Syntax-only analysis for codesize, naming, unusedcode, cleancode, design,
 //! and controversial rules.
 //
-// The analyser's own syntax model uses macro-generated reads and enum paths
-// that this syntax-only detector cannot resolve. Keep these known false
-// positives out of the self-analysis report.
-// messrust-disable UnusedLocalVariable,CamelCaseVariableName
-
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
+use proc_macro2::{TokenStream, TokenTree};
 use regex::Regex;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -21,6 +18,7 @@ use crate::report::{ProcessingError, Report, Violation};
 use crate::ruleset::LoadedRule;
 use crate::suppressions::Suppressions;
 
+#[repr(usize)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleKind {
     CyclomaticComplexity,
@@ -62,6 +60,10 @@ pub enum RuleKind {
     CamelCasePropertyName,
     CamelCaseParameterName,
     CamelCaseVariableName,
+}
+
+impl RuleKind {
+    const COUNT: usize = Self::CamelCaseVariableName as usize + 1;
 }
 
 const DEFAULT_CCN: usize = 10;
@@ -156,16 +158,12 @@ fn collect_test_module_ranges(items: &[Item], ranges: &mut Vec<(usize, usize)>) 
             if !attribute.path().is_ident("cfg") {
                 return false;
             }
-            attribute
-                .meta
-                .require_list()
-                .ok()
-                .is_some_and(|list| {
-                    list.tokens
-                        .to_string()
-                        .split(|c: char| !c.is_ascii_alphanumeric())
-                        .any(|part| part == "test")
-                })
+            attribute.meta.require_list().ok().is_some_and(|list| {
+                list.tokens
+                    .to_string()
+                    .split(|c: char| !c.is_ascii_alphanumeric())
+                    .any(|part| part == "test")
+            })
         });
         if is_test {
             let span = module.span();
@@ -177,768 +175,1028 @@ fn collect_test_module_ranges(items: &[Item], ranges: &mut Vec<(usize, usize)>) 
     }
 }
 
-// messrust-disable-next-line CyclomaticComplexity,ExcessiveMethodLength
+type RuleHandler = fn(&LoadedRule, &str, &FileModel<'_>, &mut Vec<Violation>);
+
+const RULE_HANDLERS: [RuleHandler; RuleKind::COUNT] = [
+    apply_cyclomatic_complexity,
+    apply_npath_complexity,
+    apply_excessive_method_length,
+    apply_excessive_class_length,
+    apply_excessive_parameter_list,
+    apply_excessive_public_count,
+    apply_too_many_fields,
+    apply_too_many_methods,
+    apply_too_many_public_methods,
+    apply_excessive_class_complexity,
+    apply_short_class_name,
+    apply_long_class_name,
+    apply_short_variable,
+    apply_long_variable,
+    apply_short_method_name,
+    apply_constant_naming,
+    apply_boolean_get_method_name,
+    apply_unused_private_field,
+    apply_unused_local_variable,
+    apply_unused_private_method,
+    apply_unused_formal_parameter,
+    apply_boolean_argument_flag,
+    apply_else_expression,
+    apply_if_statement_assignment,
+    apply_duplicated_array_key,
+    apply_static_access,
+    apply_exit_expression,
+    apply_goto_statement,
+    apply_count_in_loop_expression,
+    apply_development_code_fragment,
+    apply_empty_catch_block,
+    apply_coupling_between_objects,
+    apply_global_variable,
+    apply_lack_of_cohesion,
+    apply_camel_case_class_name,
+    apply_camel_case_method_name,
+    apply_camel_case_property_name,
+    apply_camel_case_parameter_name,
+    apply_camel_case_variable_name,
+];
+
 fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Vec<Violation>) {
-    match rule.kind {
-        RuleKind::CyclomaticComplexity => {
-            let threshold = property_usize(rule, "reportLevel", DEFAULT_CCN);
-            for f in &model.functions {
-                let value = cyclomatic_complexity(f.body);
-                if value >= threshold {
-                    out.push(func_violation(
-                        rule,
-                        file,
-                        f,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &f.kind_label(),
-                                &f.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
+    RULE_HANDLERS[rule.kind as usize](rule, file, model, out);
+}
+
+fn apply_cyclomatic_complexity(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "reportLevel", DEFAULT_CCN);
+    for f in &model.functions {
+        let value = cyclomatic_complexity(f.body);
+        if value >= threshold {
+            out.push(func_violation(
+                rule,
+                file,
+                f,
+                format_message(
+                    &rule.message,
+                    &[
+                        f.kind_label(),
+                        &f.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_npath_complexity(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "minimum", DEFAULT_NPATH);
+    for f in &model.functions {
+        let value = npath_complexity(f.body);
+        if value >= threshold {
+            out.push(func_violation(
+                rule,
+                file,
+                f,
+                format_message(
+                    &rule.message,
+                    &[
+                        f.kind_label(),
+                        &f.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_excessive_method_length(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "minimum", DEFAULT_METHOD_LOC);
+    let ignore_ws = property_bool(rule, "ignore-whitespace", false);
+    for f in &model.functions {
+        let value = fn_loc(f, model.src, ignore_ws);
+        if value >= threshold {
+            out.push(func_violation(
+                rule,
+                file,
+                f,
+                format_message(
+                    &rule.message,
+                    &[
+                        f.kind_label(),
+                        &f.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_excessive_class_length(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "minimum", DEFAULT_CLASS_LOC);
+    let ignore_ws = property_bool(rule, "ignore-whitespace", false);
+    for t in &model.types {
+        let value = type_loc(t, model, ignore_ws);
+        if value >= threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[&t.name, &value.to_string(), &threshold.to_string()],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_excessive_parameter_list(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "minimum", DEFAULT_PARAMS);
+    for f in &model.functions {
+        let value = f.param_count;
+        if value >= threshold {
+            out.push(func_violation(
+                rule,
+                file,
+                f,
+                format_message(
+                    &rule.message,
+                    &[
+                        f.kind_label(),
+                        &f.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_excessive_public_count(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "minimum", DEFAULT_PUBLIC);
+    for t in &model.types {
+        let value = t.public_fields + t.methods.iter().filter(|m| m.is_public).count();
+        if value >= threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[
+                        &t.node_type,
+                        &t.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_too_many_fields(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "maxfields", DEFAULT_FIELDS);
+    for t in &model.types {
+        if t.node_type != "struct" && t.node_type != "union" {
+            continue;
+        }
+        let value = t.field_count;
+        if value > threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[
+                        &t.node_type,
+                        &t.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_too_many_methods(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "maxmethods", DEFAULT_METHODS);
+    let ignore = compile_phpmd_regex(
+        rule.properties
+            .get("ignorepattern")
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_IGNORE_PATTERN),
+    );
+    for t in &model.types {
+        let value = t
+            .methods
+            .iter()
+            .filter(|m| !ignored_name(&ignore, &m.name))
+            .count();
+        if value > threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[
+                        &t.node_type,
+                        &t.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_too_many_public_methods(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "maxmethods", DEFAULT_PUBLIC_METHODS);
+    let ignore = compile_phpmd_regex(
+        rule.properties
+            .get("ignorepattern")
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_IGNORE_PATTERN),
+    );
+    for t in &model.types {
+        let value = t
+            .methods
+            .iter()
+            .filter(|m| m.is_public && !ignored_name(&ignore, &m.name))
+            .count();
+        if value > threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[
+                        &t.node_type,
+                        &t.name,
+                        &value.to_string(),
+                        &threshold.to_string(),
+                    ],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_excessive_class_complexity(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "maximum", DEFAULT_WMC);
+    for t in &model.types {
+        let value: usize = t
+            .methods
+            .iter()
+            .map(|m| cyclomatic_complexity(m.body))
+            .sum();
+        if value >= threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[&t.name, &value.to_string(), &threshold.to_string()],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_short_class_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
+    let exceptions = property_list(rule, "exceptions");
+    for t in &model.types {
+        if t.name.chars().count() >= minimum {
+            continue;
+        }
+        if exceptions.iter().any(|e| e == &t.name) {
+            continue;
+        }
+        out.push(type_violation(
+            rule,
+            file,
+            t,
+            format_message(&rule.message, &[&t.name, &minimum.to_string()]),
+        ));
+    }
+}
+
+fn apply_long_class_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let maximum = property_usize(rule, "maximum", DEFAULT_LONG_CLASS);
+    let prefixes = property_list(rule, "subtract-prefixes");
+    let suffixes = property_list(rule, "subtract-suffixes");
+    for t in &model.types {
+        let effective = length_without(&t.name, &prefixes, &suffixes);
+        if effective <= maximum {
+            continue;
+        }
+        out.push(type_violation(
+            rule,
+            file,
+            t,
+            format_message(&rule.message, &[&t.name, &maximum.to_string()]),
+        ));
+    }
+}
+
+fn apply_short_variable(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
+    let exceptions = property_list(rule, "exceptions");
+    for v in &model.variables {
+        if v.is_loop_binder {
+            continue;
+        }
+        if v.name.chars().count() >= minimum {
+            continue;
+        }
+        if exceptions.iter().any(|e| e == &v.name) {
+            continue;
+        }
+        out.push(name_violation(
+            rule,
+            file,
+            v.begin_line,
+            format_message(&rule.message, &[&v.name, &minimum.to_string()]),
+        ));
+    }
+}
+
+fn apply_long_variable(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let maximum = property_usize(rule, "maximum", DEFAULT_LONG_VAR);
+    let prefixes = property_list(rule, "subtract-prefixes");
+    let suffixes = property_list(rule, "subtract-suffixes");
+    for v in &model.variables {
+        if v.is_loop_binder {
+            continue;
+        }
+        let effective = length_without(&v.name, &prefixes, &suffixes);
+        if effective <= maximum {
+            continue;
+        }
+        out.push(name_violation(
+            rule,
+            file,
+            v.begin_line,
+            format_message(&rule.message, &[&v.name, &maximum.to_string()]),
+        ));
+    }
+}
+
+fn apply_short_method_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
+    let exceptions = property_list(rule, "exceptions");
+    for f in &model.functions {
+        if f.name.chars().count() >= minimum {
+            continue;
+        }
+        if exceptions.iter().any(|e| e == &f.name) {
+            continue;
+        }
+        let parent = f.parent.as_deref().unwrap_or("");
+        out.push(func_violation(
+            rule,
+            file,
+            f,
+            format_message(&rule.message, &[parent, &f.name, &minimum.to_string()]),
+        ));
+    }
+}
+
+fn apply_constant_naming(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let convention = rule
+        .properties
+        .get("convention")
+        .map(String::as_str)
+        .unwrap_or("upper");
+    let pascal = convention.eq_ignore_ascii_case("pascal");
+    for c in &model.constants {
+        let ok = if pascal {
+            is_pascal_case(&c.name)
+        } else {
+            is_upper_case(&c.name)
+        };
+        if ok {
+            continue;
+        }
+        let description = if pascal {
+            format_message("Constant {0} should be defined in PascalCase", &[&c.name])
+        } else {
+            format_message(&rule.message, &[&c.name])
+        };
+        out.push(name_violation(rule, file, c.begin_line, description));
+    }
+}
+
+fn apply_boolean_get_method_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let check_parameterized = property_bool(rule, "checkParameterizedMethods", false);
+    for f in &model.functions {
+        if !is_getter_name(&f.name) || !f.returns_bool {
+            continue;
+        }
+        if !check_parameterized && f.param_count > 0 {
+            continue;
+        }
+        out.push(func_violation(
+            rule,
+            file,
+            f,
+            format_message(&rule.message, &[&f.name]),
+        ));
+    }
+}
+
+fn apply_unused_local_variable(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let exceptions = property_list(rule, "exceptions");
+    for local in &model.usage.locals {
+        if is_rust_unused_name(&local.name) {
+            continue;
+        }
+        if exceptions.iter().any(|e| e == &local.name) {
+            continue;
+        }
+        if model.usage.ident_reads.contains(&local.name) {
+            continue;
+        }
+        out.push(name_violation(
+            rule,
+            file,
+            local.begin_line,
+            format_message(&rule.message, &[&local.name]),
+        ));
+    }
+}
+
+fn apply_unused_formal_parameter(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for param in &model.usage.params {
+        if is_rust_unused_name(&param.name) {
+            continue;
+        }
+        if model.usage.ident_reads.contains(&param.name) {
+            continue;
+        }
+        out.push(name_violation(
+            rule,
+            file,
+            param.begin_line,
+            format_message(&rule.message, &[&param.name]),
+        ));
+    }
+}
+
+fn apply_unused_private_field(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for field in &model.usage.private_fields {
+        if is_rust_unused_name(&field.name) {
+            continue;
+        }
+        if model.usage.field_reads.contains(&field.name) {
+            continue;
+        }
+        out.push(name_violation(
+            rule,
+            file,
+            field.begin_line,
+            format_message(&rule.message, &[&field.name]),
+        ));
+    }
+}
+
+fn apply_unused_private_method(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for method in &model.usage.private_methods {
+        if is_rust_unused_name(&method.name) {
+            continue;
+        }
+        if model.usage.method_calls.contains(&method.name)
+            || model.usage.ident_reads.contains(&method.name)
+        {
+            continue;
+        }
+        out.push(name_violation(
+            rule,
+            file,
+            method.begin_line,
+            format_message(&rule.message, &[&method.name]),
+        ));
+    }
+}
+
+fn apply_boolean_argument_flag(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let exceptions = property_list(rule, "exceptions");
+    let ignore = compile_phpmd_regex(
+        rule.properties
+            .get("ignorepattern")
+            .map(String::as_str)
+            .unwrap_or(""),
+    );
+    for f in &model.functions {
+        if ignored_name(&ignore, &f.name) {
+            continue;
+        }
+        if let Some(parent) = &f.parent {
+            if exceptions.iter().any(|e| e == parent) {
+                continue;
             }
         }
-        RuleKind::NPathComplexity => {
-            let threshold = property_usize(rule, "minimum", DEFAULT_NPATH);
-            for f in &model.functions {
-                let value = npath_complexity(f.body);
-                if value >= threshold {
-                    out.push(func_violation(
-                        rule,
-                        file,
-                        f,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &f.kind_label(),
-                                &f.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
+        let image = match &f.parent {
+            Some(parent) => format!("{parent}::{}", f.name),
+            None => f.name.clone(),
+        };
+        for p in &f.bool_params {
+            if is_rust_unused_name(&p.name) {
+                continue;
             }
+            out.push(name_violation(
+                rule,
+                file,
+                p.begin_line,
+                format_message(&rule.message, &[&image, &p.name]),
+            ));
         }
-        RuleKind::ExcessiveMethodLength => {
-            let threshold = property_usize(rule, "minimum", DEFAULT_METHOD_LOC);
-            let ignore_ws = property_bool(rule, "ignore-whitespace", false);
-            for f in &model.functions {
-                let value = fn_loc(f, model.src, ignore_ws);
-                if value >= threshold {
-                    out.push(func_violation(
-                        rule,
-                        file,
-                        f,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &f.kind_label(),
-                                &f.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
+    }
+}
+
+fn apply_else_expression(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for f in &model.functions {
+        let Some(body) = f.body else {
+            continue;
+        };
+        for line in terminal_else_lines(body) {
+            out.push(name_violation(
+                rule,
+                file,
+                line,
+                format_message(&rule.message, &[&f.name]),
+            ));
+        }
+    }
+}
+
+fn apply_if_statement_assignment(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for f in &model.functions {
+        let Some(body) = f.body else {
+            continue;
+        };
+        for pos in assignment_in_condition_positions(body) {
+            out.push(name_violation(
+                rule,
+                file,
+                pos.line,
+                format_message(
+                    &rule.message,
+                    &[&pos.line.to_string(), &pos.column.to_string()],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_duplicated_array_key(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for dup in &model.duplicate_struct_keys {
+        out.push(name_violation(
+            rule,
+            file,
+            dup.line,
+            format_message(&rule.message, &[&dup.display, &dup.first_line.to_string()]),
+        ));
+    }
+}
+
+fn apply_static_access(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let exceptions = property_list(rule, "exceptions");
+    let ignore = compile_phpmd_regex(
+        rule.properties
+            .get("ignorepattern")
+            .map(String::as_str)
+            .unwrap_or(""),
+    );
+    for f in &model.functions {
+        if ignored_name(&ignore, &f.name) {
+            continue;
+        }
+        let Some(body) = f.body else {
+            continue;
+        };
+        for access in static_accesses(body, f.parent.as_deref(), &exceptions) {
+            out.push(name_violation(
+                rule,
+                file,
+                access.line,
+                format_message(&rule.message, &[&access.type_name, &f.name]),
+            ));
+        }
+    }
+}
+
+fn apply_exit_expression(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for f in &model.functions {
+        let Some(body) = f.body else {
+            continue;
+        };
+        if let Some(line) = exit_expression_line(body) {
+            out.push(name_violation(
+                rule,
+                file,
+                line,
+                format_message(&rule.message, &[f.kind_label(), &f.name]),
+            ));
+        }
+    }
+}
+
+// Rust has no goto; keep the rule loadable and quiet.
+fn apply_goto_statement(
+    _rule: &LoadedRule,
+    _file: &str,
+    _model: &FileModel<'_>,
+    _out: &mut Vec<Violation>,
+) {
+}
+
+fn apply_count_in_loop_expression(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for f in &model.functions {
+        let Some(body) = f.body else {
+            continue;
+        };
+        for hit in count_in_loop_hits(body) {
+            out.push(name_violation(
+                rule,
+                file,
+                hit.line,
+                format_message(&rule.message, &[&hit.func_name, &hit.loop_kind]),
+            ));
+        }
+    }
+}
+
+fn apply_development_code_fragment(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let extra = rule
+        .properties
+        .get("unwanted-functions")
+        .map(String::as_str)
+        .unwrap_or("");
+    let unwanted = unwanted_function_set(extra);
+    for f in &model.functions {
+        let Some(body) = f.body else {
+            continue;
+        };
+        let image = match &f.parent {
+            Some(parent) => format!("{parent}::{}", f.name),
+            None => f.name.clone(),
+        };
+        for hit in development_fragment_hits(body, &unwanted) {
+            out.push(name_violation(
+                rule,
+                file,
+                hit.line,
+                format_message(&rule.message, &[f.kind_label(), &image, &hit.func_name]),
+            ));
+        }
+    }
+}
+
+fn apply_empty_catch_block(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for f in &model.functions {
+        let Some(body) = f.body else {
+            continue;
+        };
+        for line in empty_catch_lines(body) {
+            out.push(name_violation(
+                rule,
+                file,
+                line,
+                format_message(&rule.message, &[&f.name]),
+            ));
+        }
+    }
+}
+
+fn apply_coupling_between_objects(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "maximum", DEFAULT_CBO);
+    for t in &model.types {
+        if t.node_type != "struct" && t.node_type != "enum" && t.node_type != "union" {
+            continue;
+        }
+        let value = coupling_between_objects(t, model);
+        if value >= threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(
+                    &rule.message,
+                    &[&t.name, &value.to_string(), &threshold.to_string()],
+                ),
+            ));
+        }
+    }
+}
+
+fn apply_global_variable(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let report_immutable = property_bool(rule, "report-immutable", false);
+    for g in &model.static_muts {
+        if model.mutated_statics.contains(&g.name) || report_immutable {
+            out.push(name_violation(
+                rule,
+                file,
+                g.begin_line,
+                format_message(&rule.message, &[&g.name]),
+            ));
+        }
+    }
+}
+
+fn apply_lack_of_cohesion(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let threshold = property_usize(rule, "maximum", DEFAULT_LCOM4);
+    for t in &model.types {
+        if t.node_type != "struct" && t.node_type != "enum" && t.node_type != "union" {
+            continue;
+        }
+        let value = lcom4(t);
+        if value > threshold {
+            out.push(type_violation(
+                rule,
+                file,
+                t,
+                format_message(&rule.message, &[&t.name, &value.to_string()]),
+            ));
+        }
+    }
+}
+
+fn apply_camel_case_class_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    let strict_abbr = property_bool(rule, "camelcase-abbreviations", false);
+    for t in &model.types {
+        let ok = if strict_abbr {
+            is_pascal_case_no_abbrev(&t.name)
+        } else {
+            is_pascal_case(&t.name)
+        };
+        if ok {
+            continue;
+        }
+        out.push(type_violation(
+            rule,
+            file,
+            t,
+            format_message(&rule.message, &[&t.name]),
+        ));
+    }
+}
+
+fn apply_camel_case_method_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for f in &model.functions {
+        if f.name == "_" || is_snake_case(&f.name) {
+            continue;
+        }
+        out.push(func_violation(
+            rule,
+            file,
+            f,
+            format_message(&rule.message, &[&f.name]),
+        ));
+    }
+}
+
+fn apply_camel_case_property_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for t in &model.types {
+        for field in &t.fields {
+            if is_tuple_field_name(&field.name) || field.name == "_" || is_snake_case(&field.name) {
+                continue;
             }
+            out.push(name_violation(
+                rule,
+                file,
+                field.begin_line,
+                format_message(&rule.message, &[&field.name]),
+            ));
         }
-        RuleKind::ExcessiveClassLength => {
-            let threshold = property_usize(rule, "minimum", DEFAULT_CLASS_LOC);
-            let ignore_ws = property_bool(rule, "ignore-whitespace", false);
-            for t in &model.types {
-                let value = type_loc(t, model, ignore_ws);
-                if value >= threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[&t.name, &value.to_string(), &threshold.to_string()],
-                        ),
-                    ));
-                }
-            }
+    }
+}
+
+fn apply_camel_case_parameter_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for p in &model.usage.params {
+        if p.name == "_" || is_snake_case(&p.name) {
+            continue;
         }
-        RuleKind::ExcessiveParameterList => {
-            let threshold = property_usize(rule, "minimum", DEFAULT_PARAMS);
-            for f in &model.functions {
-                let value = f.param_count;
-                if value >= threshold {
-                    out.push(func_violation(
-                        rule,
-                        file,
-                        f,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &f.kind_label(),
-                                &f.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
-            }
+        out.push(name_violation(
+            rule,
+            file,
+            p.begin_line,
+            format_message(&rule.message, &[&p.name]),
+        ));
+    }
+}
+
+fn apply_camel_case_variable_name(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
+    for v in &model.usage.locals {
+        if v.name == "_" || is_snake_case(&v.name) {
+            continue;
         }
-        RuleKind::ExcessivePublicCount => {
-            let threshold = property_usize(rule, "minimum", DEFAULT_PUBLIC);
-            for t in &model.types {
-                let value = t.public_fields + t.methods.iter().filter(|m| m.is_public).count();
-                if value >= threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &t.node_type,
-                                &t.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::TooManyFields => {
-            let threshold = property_usize(rule, "maxfields", DEFAULT_FIELDS);
-            for t in &model.types {
-                if t.node_type != "struct" && t.node_type != "union" {
-                    continue;
-                }
-                let value = t.field_count;
-                if value > threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &t.node_type,
-                                &t.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::TooManyMethods => {
-            let threshold = property_usize(rule, "maxmethods", DEFAULT_METHODS);
-            let ignore = compile_phpmd_regex(
-                rule.properties
-                    .get("ignorepattern")
-                    .map(String::as_str)
-                    .unwrap_or(DEFAULT_IGNORE_PATTERN),
-            );
-            for t in &model.types {
-                let value = t
-                    .methods
-                    .iter()
-                    .filter(|m| !ignored_name(&ignore, &m.name))
-                    .count();
-                if value > threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &t.node_type,
-                                &t.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::TooManyPublicMethods => {
-            let threshold = property_usize(rule, "maxmethods", DEFAULT_PUBLIC_METHODS);
-            let ignore = compile_phpmd_regex(
-                rule.properties
-                    .get("ignorepattern")
-                    .map(String::as_str)
-                    .unwrap_or(DEFAULT_IGNORE_PATTERN),
-            );
-            for t in &model.types {
-                let value = t
-                    .methods
-                    .iter()
-                    .filter(|m| m.is_public && !ignored_name(&ignore, &m.name))
-                    .count();
-                if value > threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[
-                                &t.node_type,
-                                &t.name,
-                                &value.to_string(),
-                                &threshold.to_string(),
-                            ],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::ExcessiveClassComplexity => {
-            let threshold = property_usize(rule, "maximum", DEFAULT_WMC);
-            for t in &model.types {
-                let value: usize = t
-                    .methods
-                    .iter()
-                    .map(|m| cyclomatic_complexity(m.body))
-                    .sum();
-                if value >= threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[&t.name, &value.to_string(), &threshold.to_string()],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::ShortClassName => {
-            let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
-            let exceptions = property_list(rule, "exceptions");
-            for t in &model.types {
-                if t.name.chars().count() >= minimum {
-                    continue;
-                }
-                if exceptions.iter().any(|e| e == &t.name) {
-                    continue;
-                }
-                out.push(type_violation(
-                    rule,
-                    file,
-                    t,
-                    format_message(&rule.message, &[&t.name, &minimum.to_string()]),
-                ));
-            }
-        }
-        RuleKind::LongClassName => {
-            let maximum = property_usize(rule, "maximum", DEFAULT_LONG_CLASS);
-            let prefixes = property_list(rule, "subtract-prefixes");
-            let suffixes = property_list(rule, "subtract-suffixes");
-            for t in &model.types {
-                let effective = length_without(&t.name, &prefixes, &suffixes);
-                if effective <= maximum {
-                    continue;
-                }
-                out.push(type_violation(
-                    rule,
-                    file,
-                    t,
-                    format_message(&rule.message, &[&t.name, &maximum.to_string()]),
-                ));
-            }
-        }
-        RuleKind::ShortVariable => {
-            let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
-            let exceptions = property_list(rule, "exceptions");
-            for v in &model.variables {
-                if v.is_loop_binder {
-                    continue;
-                }
-                if v.name.chars().count() >= minimum {
-                    continue;
-                }
-                if exceptions.iter().any(|e| e == &v.name) {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    v.begin_line,
-                    format_message(&rule.message, &[&v.name, &minimum.to_string()]),
-                ));
-            }
-        }
-        RuleKind::LongVariable => {
-            let maximum = property_usize(rule, "maximum", DEFAULT_LONG_VAR);
-            let prefixes = property_list(rule, "subtract-prefixes");
-            let suffixes = property_list(rule, "subtract-suffixes");
-            for v in &model.variables {
-                if v.is_loop_binder {
-                    continue;
-                }
-                let effective = length_without(&v.name, &prefixes, &suffixes);
-                if effective <= maximum {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    v.begin_line,
-                    format_message(&rule.message, &[&v.name, &maximum.to_string()]),
-                ));
-            }
-        }
-        RuleKind::ShortMethodName => {
-            let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
-            let exceptions = property_list(rule, "exceptions");
-            for f in &model.functions {
-                if f.name.chars().count() >= minimum {
-                    continue;
-                }
-                if exceptions.iter().any(|e| e == &f.name) {
-                    continue;
-                }
-                let parent = f.parent.as_deref().unwrap_or("");
-                out.push(func_violation(
-                    rule,
-                    file,
-                    f,
-                    format_message(
-                        &rule.message,
-                        &[parent, &f.name, &minimum.to_string()],
-                    ),
-                ));
-            }
-        }
-        RuleKind::ConstantNamingConventions => {
-            let convention = rule
-                .properties
-                .get("convention")
-                .map(String::as_str)
-                .unwrap_or("upper");
-            let pascal = convention.eq_ignore_ascii_case("pascal");
-            for c in &model.constants {
-                let ok = if pascal {
-                    is_pascal_case(&c.name)
-                } else {
-                    is_upper_case(&c.name)
-                };
-                if ok {
-                    continue;
-                }
-                let description = if pascal {
-                    format_message(
-                        "Constant {0} should be defined in PascalCase",
-                        &[&c.name],
-                    )
-                } else {
-                    format_message(&rule.message, &[&c.name])
-                };
-                out.push(name_violation(rule, file, c.begin_line, description));
-            }
-        }
-        RuleKind::BooleanGetMethodName => {
-            let check_parameterized =
-                property_bool(rule, "checkParameterizedMethods", false);
-            for f in &model.functions {
-                if !is_getter_name(&f.name) || !f.returns_bool {
-                    continue;
-                }
-                if !check_parameterized && f.param_count > 0 {
-                    continue;
-                }
-                out.push(func_violation(
-                    rule,
-                    file,
-                    f,
-                    format_message(&rule.message, &[&f.name]),
-                ));
-            }
-        }
-        RuleKind::UnusedLocalVariable => {
-            let exceptions = property_list(rule, "exceptions");
-            for local in &model.usage.locals {
-                if is_rust_unused_name(&local.name) {
-                    continue;
-                }
-                if exceptions.iter().any(|e| e == &local.name) {
-                    continue;
-                }
-                if model.usage.ident_reads.contains(&local.name) {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    local.begin_line,
-                    format_message(&rule.message, &[&local.name]),
-                ));
-            }
-        }
-        RuleKind::UnusedFormalParameter => {
-            for param in &model.usage.params {
-                if is_rust_unused_name(&param.name) {
-                    continue;
-                }
-                if model.usage.ident_reads.contains(&param.name) {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    param.begin_line,
-                    format_message(&rule.message, &[&param.name]),
-                ));
-            }
-        }
-        RuleKind::UnusedPrivateField => {
-            for field in &model.usage.private_fields {
-                if is_rust_unused_name(&field.name) {
-                    continue;
-                }
-                if model.usage.field_reads.contains(&field.name) {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    field.begin_line,
-                    format_message(&rule.message, &[&field.name]),
-                ));
-            }
-        }
-        RuleKind::UnusedPrivateMethod => {
-            for method in &model.usage.private_methods {
-                if is_rust_unused_name(&method.name) {
-                    continue;
-                }
-                if model.usage.method_calls.contains(&method.name)
-                    || model.usage.ident_reads.contains(&method.name)
-                {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    method.begin_line,
-                    format_message(&rule.message, &[&method.name]),
-                ));
-            }
-        }
-        RuleKind::BooleanArgumentFlag => {
-            let exceptions = property_list(rule, "exceptions");
-            let ignore = compile_phpmd_regex(
-                rule.properties
-                    .get("ignorepattern")
-                    .map(String::as_str)
-                    .unwrap_or(""),
-            );
-            for f in &model.functions {
-                if ignored_name(&ignore, &f.name) {
-                    continue;
-                }
-                if let Some(parent) = &f.parent {
-                    if exceptions.iter().any(|e| e == parent) {
-                        continue;
-                    }
-                }
-                let image = match &f.parent {
-                    Some(parent) => format!("{parent}::{}", f.name),
-                    None => f.name.clone(),
-                };
-                for p in &f.bool_params {
-                    if is_rust_unused_name(&p.name) {
-                        continue;
-                    }
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        p.begin_line,
-                        format_message(&rule.message, &[&image, &p.name]),
-                    ));
-                }
-            }
-        }
-        RuleKind::ElseExpression => {
-            for f in &model.functions {
-                let Some(body) = f.body else {
-                    continue;
-                };
-                for line in terminal_else_lines(body) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        line,
-                        format_message(&rule.message, &[&f.name]),
-                    ));
-                }
-            }
-        }
-        RuleKind::IfStatementAssignment => {
-            for f in &model.functions {
-                let Some(body) = f.body else {
-                    continue;
-                };
-                for pos in assignment_in_condition_positions(body) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        pos.line,
-                        format_message(
-                            &rule.message,
-                            &[&pos.line.to_string(), &pos.column.to_string()],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::DuplicatedArrayKey => {
-            for dup in &model.duplicate_struct_keys {
-                out.push(name_violation(
-                    rule,
-                    file,
-                    dup.line,
-                    format_message(
-                        &rule.message,
-                        &[&dup.display, &dup.first_line.to_string()],
-                    ),
-                ));
-            }
-        }
-        RuleKind::StaticAccess => {
-            let exceptions = property_list(rule, "exceptions");
-            let ignore = compile_phpmd_regex(
-                rule.properties
-                    .get("ignorepattern")
-                    .map(String::as_str)
-                    .unwrap_or(""),
-            );
-            for f in &model.functions {
-                if ignored_name(&ignore, &f.name) {
-                    continue;
-                }
-                let Some(body) = f.body else {
-                    continue;
-                };
-                for access in static_accesses(body, f.parent.as_deref(), &exceptions) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        access.line,
-                        format_message(&rule.message, &[&access.type_name, &f.name]),
-                    ));
-                }
-            }
-        }
-        // Rust has no goto; keep the rule loadable and quiet.
-        RuleKind::GotoStatement => {}
-        RuleKind::ExitExpression => {
-            for f in &model.functions {
-                let Some(body) = f.body else {
-                    continue;
-                };
-                if let Some(line) = exit_expression_line(body) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        line,
-                        format_message(&rule.message, &[&f.kind_label(), &f.name]),
-                    ));
-                }
-            }
-        }
-        RuleKind::CountInLoopExpression => {
-            for f in &model.functions {
-                let Some(body) = f.body else {
-                    continue;
-                };
-                for hit in count_in_loop_hits(body) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        hit.line,
-                        format_message(&rule.message, &[&hit.func_name, &hit.loop_kind]),
-                    ));
-                }
-            }
-        }
-        RuleKind::DevelopmentCodeFragment => {
-            let extra = rule
-                .properties
-                .get("unwanted-functions")
-                .map(String::as_str)
-                .unwrap_or("");
-            let unwanted = unwanted_function_set(extra);
-            for f in &model.functions {
-                let Some(body) = f.body else {
-                    continue;
-                };
-                let image = match &f.parent {
-                    Some(parent) => format!("{parent}::{}", f.name),
-                    None => f.name.clone(),
-                };
-                for hit in development_fragment_hits(body, &unwanted) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        hit.line,
-                        format_message(
-                            &rule.message,
-                            &[&f.kind_label(), &image, &hit.func_name],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::EmptyCatchBlock => {
-            for f in &model.functions {
-                let Some(body) = f.body else {
-                    continue;
-                };
-                for line in empty_catch_lines(body) {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        line,
-                        format_message(&rule.message, &[&f.name]),
-                    ));
-                }
-            }
-        }
-        RuleKind::CouplingBetweenObjects => {
-            let threshold = property_usize(rule, "maximum", DEFAULT_CBO);
-            for t in &model.types {
-                if t.node_type != "struct" && t.node_type != "enum" && t.node_type != "union" {
-                    continue;
-                }
-                let value = coupling_between_objects(t, model);
-                if value >= threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[&t.name, &value.to_string(), &threshold.to_string()],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::GlobalVariable => {
-            let report_immutable = property_bool(rule, "report-immutable", false);
-            for g in &model.static_muts {
-                if model.mutated_statics.contains(&g.name) || report_immutable {
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        g.begin_line,
-                        format_message(&rule.message, &[&g.name]),
-                    ));
-                }
-            }
-        }
-        RuleKind::LackOfCohesionOfMethods => {
-            let threshold = property_usize(rule, "maximum", DEFAULT_LCOM4);
-            for t in &model.types {
-                if t.node_type != "struct" && t.node_type != "enum" && t.node_type != "union" {
-                    continue;
-                }
-                let value = lcom4(t);
-                if value > threshold {
-                    out.push(type_violation(
-                        rule,
-                        file,
-                        t,
-                        format_message(
-                            &rule.message,
-                            &[&t.name, &value.to_string()],
-                        ),
-                    ));
-                }
-            }
-        }
-        RuleKind::CamelCaseClassName => {
-            let strict_abbr = property_bool(rule, "camelcase-abbreviations", false);
-            for t in &model.types {
-                let ok = if strict_abbr {
-                    is_pascal_case_no_abbrev(&t.name)
-                } else {
-                    is_pascal_case(&t.name)
-                };
-                if ok {
-                    continue;
-                }
-                out.push(type_violation(
-                    rule,
-                    file,
-                    t,
-                    format_message(&rule.message, &[&t.name]),
-                ));
-            }
-        }
-        RuleKind::CamelCaseMethodName => {
-            for f in &model.functions {
-                if f.name == "_" || is_snake_case(&f.name) {
-                    continue;
-                }
-                out.push(func_violation(
-                    rule,
-                    file,
-                    f,
-                    format_message(&rule.message, &[&f.name]),
-                ));
-            }
-        }
-        RuleKind::CamelCasePropertyName => {
-            for t in &model.types {
-                for field in &t.fields {
-                    if is_tuple_field_name(&field.name) || field.name == "_" || is_snake_case(&field.name)
-                    {
-                        continue;
-                    }
-                    out.push(name_violation(
-                        rule,
-                        file,
-                        field.begin_line,
-                        format_message(&rule.message, &[&field.name]),
-                    ));
-                }
-            }
-        }
-        RuleKind::CamelCaseParameterName => {
-            for p in &model.usage.params {
-                if p.name == "_" || is_snake_case(&p.name) {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    p.begin_line,
-                    format_message(&rule.message, &[&p.name]),
-                ));
-            }
-        }
-        RuleKind::CamelCaseVariableName => {
-            for v in &model.usage.locals {
-                if v.name == "_" || is_snake_case(&v.name) {
-                    continue;
-                }
-                out.push(name_violation(
-                    rule,
-                    file,
-                    v.begin_line,
-                    format_message(&rule.message, &[&v.name]),
-                ));
-            }
-        }
+        out.push(name_violation(
+            rule,
+            file,
+            v.begin_line,
+            format_message(&rule.message, &[&v.name]),
+        ));
     }
 }
 
@@ -966,7 +1224,12 @@ fn type_loc(t: &TypeModel<'_>, model: &FileModel<'_>, ignore_ws: bool) -> usize 
     loc
 }
 
-fn func_violation(rule: &LoadedRule, file: &str, f: &FnModel<'_>, description: String) -> Violation {
+fn func_violation(
+    rule: &LoadedRule,
+    file: &str,
+    f: &FnModel<'_>,
+    description: String,
+) -> Violation {
     let (function, class, method) = match f.parent {
         Some(ref class) => (String::new(), class.clone(), f.name.clone()),
         None => (f.name.clone(), String::new(), String::new()),
@@ -1099,7 +1362,9 @@ fn is_pascal_case_no_abbrev(name: &str) -> bool {
         return false;
     }
     let chars: Vec<char> = name.chars().collect();
-    !chars.windows(2).any(|w| w[0].is_uppercase() && w[1].is_uppercase())
+    !chars
+        .windows(2)
+        .any(|w| w[0].is_uppercase() && w[1].is_uppercase())
 }
 
 fn is_snake_case(name: &str) -> bool {
@@ -1388,11 +1653,7 @@ fn static_receiver_type(path: &syn::Path) -> Option<String> {
         if name == "Self" {
             return Some(name);
         }
-        if name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_uppercase())
-        {
+        if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
             return Some(name);
         }
     }
@@ -1541,6 +1802,7 @@ struct FnModel<'a> {
     body: Option<&'a syn::Block>,
     returns_bool: bool,
     dep_types: Vec<String>,
+    counts_for_type_metrics: bool,
 }
 
 impl FnModel<'_> {
@@ -1591,6 +1853,7 @@ struct FileModel<'a> {
     mutated_statics: HashSet<String>,
 }
 
+#[derive(Default)]
 struct UseDefModel {
     locals: Vec<NamedSite>,
     params: Vec<NamedSite>,
@@ -1646,18 +1909,11 @@ impl<'a> FileModel<'a> {
     }
 }
 
-// messrust-disable-next-line ExcessiveClassComplexity,CouplingBetweenObjects
 struct UseDefCollector {
-    locals: Vec<NamedSite>,
-    params: Vec<NamedSite>,
-    private_fields: Vec<NamedSite>,
-    private_methods: Vec<NamedSite>,
-    ident_reads: HashSet<String>,
-    field_reads: HashSet<String>,
-    method_calls: HashSet<String>,
+    model: UseDefModel,
     binding_mode: BindingMode,
-    assign_lhs: bool,
     in_trait_impl: bool,
+    derived_fields_are_used: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1670,47 +1926,70 @@ enum BindingMode {
 impl UseDefCollector {
     fn new() -> Self {
         Self {
-            locals: Vec::new(),
-            params: Vec::new(),
-            private_fields: Vec::new(),
-            private_methods: Vec::new(),
-            ident_reads: HashSet::new(),
-            field_reads: HashSet::new(),
-            method_calls: HashSet::new(),
+            model: UseDefModel::default(),
             binding_mode: BindingMode::None,
-            assign_lhs: false,
             in_trait_impl: false,
+            derived_fields_are_used: false,
         }
     }
 
     fn into_model(self) -> UseDefModel {
-        UseDefModel {
-            locals: self.locals,
-            params: self.params,
-            private_fields: self.private_fields,
-            private_methods: self.private_methods,
-            ident_reads: self.ident_reads,
-            field_reads: self.field_reads,
-            method_calls: self.method_calls,
+        self.model
+    }
+}
+
+fn with_binding_mode<F>(collector: &mut UseDefCollector, mode: BindingMode, visit: F)
+where
+    F: FnOnce(&mut UseDefCollector),
+{
+    let previous = collector.binding_mode;
+    collector.binding_mode = mode;
+    visit(collector);
+    collector.binding_mode = previous;
+}
+
+fn record_params_from_sig(collector: &mut UseDefCollector, signature: &syn::Signature) {
+    for input in &signature.inputs {
+        if let FnArg::Typed(parameter) = input {
+            with_binding_mode(collector, BindingMode::Param, |visitor| {
+                visitor.visit_pat(&parameter.pat)
+            });
         }
     }
+}
 
-    fn with_binding_mode<F>(&mut self, mode: BindingMode, f: F)
-    where
-        F: FnOnce(&mut Self),
-    {
-        let prev = self.binding_mode;
-        self.binding_mode = mode;
-        f(self);
-        self.binding_mode = prev;
-    }
-
-    fn record_params_from_sig(&mut self, sig: &syn::Signature) {
-        for input in &sig.inputs {
-            if let FnArg::Typed(pt) = input {
-                self.with_binding_mode(BindingMode::Param, |this| this.visit_pat(&pt.pat));
+fn visit_assignment_target(collector: &mut UseDefCollector, target: &syn::Expr) {
+    match target {
+        syn::Expr::Path(_) | syn::Expr::Infer(_) => {}
+        syn::Expr::Tuple(tuple) => {
+            for element in &tuple.elems {
+                visit_assignment_target(collector, element);
             }
         }
+        syn::Expr::Array(array) => {
+            for element in &array.elems {
+                visit_assignment_target(collector, element);
+            }
+        }
+        syn::Expr::Struct(structure) => {
+            for field in &structure.fields {
+                visit_assignment_target(collector, &field.expr);
+            }
+        }
+        _ => visit_assignment_place(collector, target),
+    }
+}
+
+fn visit_assignment_place(collector: &mut UseDefCollector, target: &syn::Expr) {
+    match target {
+        syn::Expr::Field(field) => collector.visit_expr(&field.base),
+        syn::Expr::Index(index) => {
+            collector.visit_expr(&index.expr);
+            collector.visit_expr(&index.index);
+        }
+        syn::Expr::Paren(paren) => visit_assignment_target(collector, &paren.expr),
+        syn::Expr::Group(group) => visit_assignment_target(collector, &group.expr),
+        _ => collector.visit_expr(target),
     }
 }
 
@@ -1719,7 +1998,9 @@ impl<'ast> Visit<'ast> for UseDefCollector {
         for attr in &node.attrs {
             self.visit_attribute(attr);
         }
-        self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&node.pat));
+        with_binding_mode(self, BindingMode::Local, |visitor| {
+            visitor.visit_pat(&node.pat)
+        });
         if let Some(init) = &node.init {
             self.visit_expr(&init.expr);
             if let Some((_, diverge)) = &init.diverge {
@@ -1729,7 +2010,7 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_item_fn(&mut self, node: &'ast ItemFn) {
-        self.record_params_from_sig(&node.sig);
+        record_params_from_sig(self, &node.sig);
         self.visit_block(&node.block);
     }
 
@@ -1740,19 +2021,40 @@ impl<'ast> Visit<'ast> for UseDefCollector {
         self.in_trait_impl = prev;
     }
 
+    fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
+        let previous = self.derived_fields_are_used;
+        self.derived_fields_are_used = derive_uses_fields(&node.attrs);
+        syn::visit::visit_item_struct(self, node);
+        self.derived_fields_are_used = previous;
+    }
+
+    fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
+        let previous = self.derived_fields_are_used;
+        self.derived_fields_are_used = derive_uses_fields(&node.attrs);
+        syn::visit::visit_item_enum(self, node);
+        self.derived_fields_are_used = previous;
+    }
+
+    fn visit_item_union(&mut self, node: &'ast ItemUnion) {
+        let previous = self.derived_fields_are_used;
+        self.derived_fields_are_used = derive_uses_fields(&node.attrs);
+        syn::visit::visit_item_union(self, node);
+        self.derived_fields_are_used = previous;
+    }
+
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         if !self.in_trait_impl && is_private(&node.vis) {
-            self.private_methods.push(NamedSite {
+            self.model.private_methods.push(NamedSite {
                 name: node.sig.ident.to_string(),
                 begin_line: node.sig.fn_token.span().start().line,
             });
         }
-        self.record_params_from_sig(&node.sig);
+        record_params_from_sig(self, &node.sig);
         self.visit_block(&node.block);
     }
 
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
-        self.record_params_from_sig(&node.sig);
+        record_params_from_sig(self, &node.sig);
         if let Some(body) = &node.default {
             self.visit_block(body);
         }
@@ -1760,8 +2062,8 @@ impl<'ast> Visit<'ast> for UseDefCollector {
 
     fn visit_field(&mut self, node: &'ast syn::Field) {
         if let Some(ident) = &node.ident {
-            if is_private(&node.vis) {
-                self.private_fields.push(NamedSite {
+            if is_private(&node.vis) && !self.derived_fields_are_used {
+                self.model.private_fields.push(NamedSite {
                     name: ident.to_string(),
                     begin_line: ident.span().start().line,
                 });
@@ -1774,7 +2076,9 @@ impl<'ast> Visit<'ast> for UseDefCollector {
         for attr in &node.attrs {
             self.visit_attribute(attr);
         }
-        self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&node.pat));
+        with_binding_mode(self, BindingMode::Local, |visitor| {
+            visitor.visit_pat(&node.pat)
+        });
         if let Some((_, guard)) = &node.guard {
             self.visit_expr(guard);
         }
@@ -1785,7 +2089,9 @@ impl<'ast> Visit<'ast> for UseDefCollector {
         for attr in &node.attrs {
             self.visit_attribute(attr);
         }
-        self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&node.pat));
+        with_binding_mode(self, BindingMode::Local, |visitor| {
+            visitor.visit_pat(&node.pat)
+        });
         self.visit_expr(&node.expr);
         self.visit_block(&node.body);
     }
@@ -1795,7 +2101,9 @@ impl<'ast> Visit<'ast> for UseDefCollector {
             self.visit_attribute(attr);
         }
         if let syn::Expr::Let(l) = &*node.cond {
-            self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&l.pat));
+            with_binding_mode(self, BindingMode::Local, |visitor| {
+                visitor.visit_pat(&l.pat)
+            });
             self.visit_expr(&l.expr);
         } else {
             self.visit_expr(&node.cond);
@@ -1808,7 +2116,9 @@ impl<'ast> Visit<'ast> for UseDefCollector {
             self.visit_attribute(attr);
         }
         if let syn::Expr::Let(l) = &*node.cond {
-            self.with_binding_mode(BindingMode::Local, |this| this.visit_pat(&l.pat));
+            with_binding_mode(self, BindingMode::Local, |visitor| {
+                visitor.visit_pat(&l.pat)
+            });
             self.visit_expr(&l.expr);
         } else {
             self.visit_expr(&node.cond);
@@ -1821,14 +2131,14 @@ impl<'ast> Visit<'ast> for UseDefCollector {
 
     fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
         let name = node.ident.to_string();
-        if name != "self" {
+        if is_binding_name(&name) {
             let site = NamedSite {
                 name,
                 begin_line: node.ident.span().start().line,
             };
             match self.binding_mode {
-                BindingMode::Local => self.locals.push(site),
-                BindingMode::Param => self.params.push(site),
+                BindingMode::Local => self.model.locals.push(site),
+                BindingMode::Param => self.model.params.push(site),
                 BindingMode::None => {}
             }
         }
@@ -1839,67 +2149,150 @@ impl<'ast> Visit<'ast> for UseDefCollector {
 
     fn visit_field_pat(&mut self, node: &'ast syn::FieldPat) {
         if let Member::Named(ident) = &node.member {
-            self.field_reads.insert(ident.to_string());
+            self.model.field_reads.insert(ident.to_string());
         }
         self.visit_pat(&node.pat);
     }
 
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
-        if !self.assign_lhs {
-            if let Some(ident) = path_single_ident(node) {
-                if ident != "self" && ident != "Self" {
-                    self.ident_reads.insert(ident);
-                }
-            } else if let Some(ident) = path_last_ident(node) {
-                self.method_calls.insert(ident);
+        if let Some(ident) = path_single_ident(node) {
+            if ident != "self" && ident != "Self" {
+                self.model.ident_reads.insert(ident);
             }
+        } else if let Some(ident) = path_last_ident(node) {
+            self.model.method_calls.insert(ident);
         }
         syn::visit::visit_expr_path(self, node);
     }
 
     fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
         self.visit_expr(&node.base);
-        if !self.assign_lhs {
-            if let Member::Named(ident) = &node.member {
-                self.field_reads.insert(ident.to_string());
-            }
+        if let Member::Named(ident) = &node.member {
+            self.model.field_reads.insert(ident.to_string());
         }
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        self.method_calls.insert(node.method.to_string());
+        self.model.method_calls.insert(node.method.to_string());
         syn::visit::visit_expr_method_call(self, node);
     }
 
     fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
-        self.assign_lhs = true;
-        self.visit_expr(&node.left);
-        self.assign_lhs = false;
+        visit_assignment_target(self, &node.left);
         self.visit_expr(&node.right);
     }
 
-    fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
-        if matches!(
-            node.op,
-            syn::BinOp::AddAssign(_)
-                | syn::BinOp::SubAssign(_)
-                | syn::BinOp::MulAssign(_)
-                | syn::BinOp::DivAssign(_)
-                | syn::BinOp::RemAssign(_)
-                | syn::BinOp::BitXorAssign(_)
-                | syn::BinOp::BitAndAssign(_)
-                | syn::BinOp::BitOrAssign(_)
-                | syn::BinOp::ShlAssign(_)
-                | syn::BinOp::ShrAssign(_)
-        ) {
-            self.assign_lhs = true;
-            self.visit_expr(&node.left);
-            self.assign_lhs = false;
-            self.visit_expr(&node.right);
-        } else {
-            syn::visit::visit_expr_binary(self, node);
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        collect_macro_reads(
+            node.tokens.clone(),
+            &mut self.model.ident_reads,
+            &mut self.model.field_reads,
+        );
+        if is_format_macro(node) {
+            collect_format_captures(node.tokens.clone(), &mut self.model.ident_reads);
+        }
+        syn::visit::visit_macro(self, node);
+    }
+}
+
+fn collect_macro_reads(
+    tokens: TokenStream,
+    ident_reads: &mut HashSet<String>,
+    field_reads: &mut HashSet<String>,
+) {
+    let mut after_dot = false;
+    for token in tokens {
+        match token {
+            TokenTree::Group(group) => {
+                collect_macro_reads(group.stream(), ident_reads, field_reads);
+                after_dot = false;
+            }
+            TokenTree::Ident(ident) => {
+                let name = ident.to_string();
+                ident_reads.insert(name.clone());
+                if after_dot {
+                    field_reads.insert(name);
+                }
+                after_dot = false;
+            }
+            TokenTree::Punct(punctuation) => after_dot = punctuation.as_char() == '.',
+            _ => after_dot = false,
         }
     }
+}
+
+fn derive_uses_fields(attributes: &[syn::Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        if !attribute.path().is_ident("derive") {
+            return false;
+        }
+        let mut uses_fields = false;
+        let _ = attribute.parse_nested_meta(|meta| {
+            let name = meta.path.segments.last().map(|segment| &segment.ident);
+            if name.is_some_and(|name| name == "Serialize" || name == "Deserialize") {
+                uses_fields = true;
+            }
+            Ok(())
+        });
+        uses_fields
+    })
+}
+
+fn is_format_macro(node: &syn::Macro) -> bool {
+    let Some(name) = node
+        .path
+        .segments
+        .last()
+        .map(|segment| segment.ident.to_string())
+    else {
+        return false;
+    };
+    matches!(
+        name.as_str(),
+        "format"
+            | "format_args"
+            | "print"
+            | "println"
+            | "eprint"
+            | "eprintln"
+            | "write"
+            | "writeln"
+            | "panic"
+            | "assert"
+            | "assert_eq"
+            | "assert_ne"
+            | "debug_assert"
+            | "debug_assert_eq"
+            | "debug_assert_ne"
+    )
+}
+
+fn collect_format_captures(tokens: TokenStream, reads: &mut HashSet<String>) {
+    for token in tokens {
+        match token {
+            TokenTree::Group(group) => collect_format_captures(group.stream(), reads),
+            TokenTree::Literal(literal) => {
+                let Ok(syn::Lit::Str(value)) = syn::parse_str::<syn::Lit>(&literal.to_string())
+                else {
+                    continue;
+                };
+                reads.extend(format_capture_names(&value.value()));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn format_capture_names(format: &str) -> Vec<String> {
+    static CAPTURE: OnceLock<Regex> = OnceLock::new();
+    let capture = CAPTURE.get_or_init(|| {
+        Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)(?:[}:])").expect("valid format capture regex")
+    });
+    let unescaped = format.replace("{{", "");
+    capture
+        .captures_iter(&unescaped)
+        .filter_map(|captures| captures.get(1).map(|name| name.as_str().to_string()))
+        .collect()
 }
 
 fn path_single_ident(path: &syn::ExprPath) -> Option<String> {
@@ -1918,7 +2311,10 @@ fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
     path.path.segments.last().map(|s| s.ident.to_string())
 }
 
-// messrust-disable-next-line LackOfCohesionOfMethods
+fn is_binding_name(name: &str) -> bool {
+    name != "self" && name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
+}
+
 struct BindingCollector {
     variables: Vec<NamedBinding>,
     constants: Vec<NamedBinding>,
@@ -1953,7 +2349,7 @@ impl<'ast> Visit<'ast> for BindingCollector {
     }
 
     fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
-        if node.ident != "self" {
+        if is_binding_name(&node.ident.to_string()) {
             self.variables.push(NamedBinding {
                 name: node.ident.to_string(),
                 begin_line: node.ident.span().start().line,
@@ -2011,7 +2407,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
     }
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn collect_items<'a>(
     items: &'a [Item],
     types: &mut HashMap<String, TypeModel<'a>>,
@@ -2025,48 +2420,67 @@ fn collect_items<'a>(
             Item::Trait(t) => insert_trait(types, t, functions),
             Item::Fn(f) => functions.push(fn_from_item(f)),
             Item::Impl(im) => attach_impl(types, functions, im),
-            Item::Mod(m) => {
-                if let Some((_, nested)) = &m.content {
-                    collect_items(nested, types, functions);
-                }
-            }
+            Item::Mod(module) => collect_module_items(module, types, functions),
             _ => {}
         }
     }
 }
 
-fn upsert_type<'a>(
+fn collect_module_items<'a>(
+    module: &'a syn::ItemMod,
     types: &mut HashMap<String, TypeModel<'a>>,
+    functions: &mut Vec<FnModel<'a>>,
+) {
+    if let Some((_, nested)) = &module.content {
+        collect_items(nested, types, functions);
+    }
+}
+
+struct TypeDefinition {
     name: String,
-    node_type: &str,
+    node_type: &'static str,
     begin_line: usize,
     end_line: usize,
     field_count: usize,
     public_fields: usize,
     fields: Vec<FieldInfo>,
-) {
-    types
-        .entry(name.clone())
-        .and_modify(|existing| {
+}
+
+fn upsert_type<'a>(types: &mut HashMap<String, TypeModel<'a>>, definition: TypeDefinition) {
+    let TypeDefinition {
+        name,
+        node_type,
+        begin_line,
+        end_line,
+        field_count,
+        public_fields,
+        fields,
+    } = definition;
+    match types.entry(name.clone()) {
+        std::collections::hash_map::Entry::Occupied(mut entry) => {
+            let existing = entry.get_mut();
             existing.node_type = node_type.to_string();
             existing.begin_line = begin_line;
             existing.end_line = end_line;
             existing.field_count = field_count;
             existing.public_fields = public_fields;
             if !fields.is_empty() {
-                existing.fields = fields.clone();
+                existing.fields = fields;
             }
-        })
-        .or_insert_with(|| TypeModel {
-            name,
-            node_type: node_type.to_string(),
-            begin_line,
-            end_line,
-            field_count,
-            public_fields,
-            fields,
-            methods: Vec::new(),
-        });
+        }
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(TypeModel {
+                name,
+                node_type: node_type.to_string(),
+                begin_line,
+                end_line,
+                field_count,
+                public_fields,
+                fields,
+                methods: Vec::new(),
+            });
+        }
+    }
 }
 
 fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
@@ -2101,13 +2515,15 @@ fn insert_struct<'a>(types: &mut HashMap<String, TypeModel<'a>>, s: &'a ItemStru
     let (field_count, public_fields) = field_stats(&s.fields);
     upsert_type(
         types,
-        s.ident.to_string(),
-        "struct",
-        s.struct_token.span().start().line,
-        s.span().end().line,
-        field_count,
-        public_fields,
-        field_infos(&s.fields),
+        TypeDefinition {
+            name: s.ident.to_string(),
+            node_type: "struct",
+            begin_line: s.struct_token.span().start().line,
+            end_line: s.span().end().line,
+            field_count,
+            public_fields,
+            fields: field_infos(&s.fields),
+        },
     );
 }
 
@@ -2120,13 +2536,15 @@ fn insert_enum<'a>(types: &mut HashMap<String, TypeModel<'a>>, e: &'a ItemEnum) 
     }
     upsert_type(
         types,
-        e.ident.to_string(),
-        "enum",
-        e.enum_token.span().start().line,
-        e.span().end().line,
-        e.variants.len(),
-        0,
-        fields,
+        TypeDefinition {
+            name: e.ident.to_string(),
+            node_type: "enum",
+            begin_line: e.enum_token.span().start().line,
+            end_line: e.span().end().line,
+            field_count: e.variants.len(),
+            public_fields: 0,
+            fields,
+        },
     );
 }
 
@@ -2148,13 +2566,15 @@ fn insert_union<'a>(types: &mut HashMap<String, TypeModel<'a>>, u: &'a ItemUnion
         .collect();
     upsert_type(
         types,
-        u.ident.to_string(),
-        "union",
-        u.union_token.span().start().line,
-        u.span().end().line,
-        field_count,
-        public_fields,
-        fields,
+        TypeDefinition {
+            name: u.ident.to_string(),
+            node_type: "union",
+            begin_line: u.union_token.span().start().line,
+            end_line: u.span().end().line,
+            field_count,
+            public_fields,
+            fields,
+        },
     );
 }
 
@@ -2188,6 +2608,7 @@ fn insert_trait<'a>(
                 body,
                 returns_bool: returns_bool(&m.sig.output),
                 dep_types: sig_dep_types(&m.sig),
+                counts_for_type_metrics: true,
             });
         }
     }
@@ -2200,7 +2621,7 @@ fn insert_trait<'a>(
             existing.end_line = t.span().end().line;
             existing.field_count = 0;
             existing.public_fields = 0;
-            existing.methods.extend(methods.drain(..));
+            existing.methods.append(&mut methods);
         })
         .or_insert_with(|| TypeModel {
             name,
@@ -2225,6 +2646,7 @@ fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
         body: Some(&f.block),
         returns_bool: returns_bool(&f.sig.output),
         dep_types: sig_dep_types(&f.sig),
+        counts_for_type_metrics: false,
     }
 }
 
@@ -2247,20 +2669,21 @@ fn attach_impl<'a>(
         fields: Vec::new(),
         methods: Vec::new(),
     });
-    let type_entry = types.get_mut(&ty_name).unwrap();
     for item in &im.items {
         if let syn::ImplItem::Fn(m) = item {
             let begin = m.sig.fn_token.span().start().line;
             let end = m.span().end().line;
             let name = m.sig.ident.to_string();
             let is_pub = is_public(&m.vis);
-            type_entry.methods.push(MethodRef {
-                name: name.clone(),
-                begin_line: begin,
-                end_line: end,
-                is_public: is_pub,
-                body: Some(&m.block),
-            });
+            if im.trait_.is_none() {
+                types.get_mut(&ty_name).unwrap().methods.push(MethodRef {
+                    name: name.clone(),
+                    begin_line: begin,
+                    end_line: end,
+                    is_public: is_pub,
+                    body: Some(&m.block),
+                });
+            }
             functions.push(FnModel {
                 name,
                 parent: Some(ty_name.clone()),
@@ -2271,6 +2694,7 @@ fn attach_impl<'a>(
                 body: Some(&m.block),
                 returns_bool: returns_bool(&m.sig.output),
                 dep_types: sig_dep_types(&m.sig),
+                counts_for_type_metrics: im.trait_.is_none(),
             });
         }
     }
@@ -2295,33 +2719,21 @@ fn type_names_in(ty: &syn::Type) -> Vec<String> {
     out
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn collect_type_names(ty: &syn::Type, out: &mut Vec<String>) {
-    match ty {
-        syn::Type::Path(p) => {
-            if let Some(seg) = p.path.segments.last() {
-                out.push(seg.ident.to_string());
-                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-                    for arg in &args.args {
-                        if let syn::GenericArgument::Type(inner) = arg {
-                            collect_type_names(inner, out);
-                        }
-                    }
-                }
-            }
+    let mut collector = TypeNameCollector { names: out };
+    collector.visit_type(ty);
+}
+
+struct TypeNameCollector<'a> {
+    names: &'a mut Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for TypeNameCollector<'_> {
+    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+        if let Some(segment) = node.path.segments.last() {
+            self.names.push(segment.ident.to_string());
         }
-        syn::Type::Reference(r) => collect_type_names(&r.elem, out),
-        syn::Type::Slice(s) => collect_type_names(&s.elem, out),
-        syn::Type::Array(a) => collect_type_names(&a.elem, out),
-        syn::Type::Ptr(p) => collect_type_names(&p.elem, out),
-        syn::Type::Tuple(t) => {
-            for elem in &t.elems {
-                collect_type_names(elem, out);
-            }
-        }
-        syn::Type::Paren(p) => collect_type_names(&p.elem, out),
-        syn::Type::Group(g) => collect_type_names(&g.elem, out),
-        _ => {}
+        syn::visit::visit_type_path(self, node);
     }
 }
 
@@ -2532,11 +2944,7 @@ fn expr_is_empty_block(expr: &syn::Expr) -> bool {
 
 fn pat_is_err(pat: &Pat) -> bool {
     match pat {
-        Pat::TupleStruct(ts) => ts
-            .path
-            .segments
-            .last()
-            .is_some_and(|s| s.ident == "Err"),
+        Pat::TupleStruct(ts) => ts.path.segments.last().is_some_and(|s| s.ident == "Err"),
         Pat::Ident(id) => id.ident == "Err",
         Pat::Or(p) => p.cases.iter().any(pat_is_err),
         _ => false,
@@ -2547,8 +2955,7 @@ impl<'ast> Visit<'ast> for EmptyCatchCollector<'_> {
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
         if let syn::Expr::Let(l) = &*node.cond {
             if pat_is_err(&l.pat) && block_is_empty(&node.then_branch) {
-                self.lines
-                    .push(node.if_token.span().start().line);
+                self.lines.push(node.if_token.span().start().line);
             }
         }
         syn::visit::visit_expr_if(self, node);
@@ -2567,31 +2974,29 @@ impl<'ast> Visit<'ast> for EmptyCatchCollector<'_> {
     fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
 }
 
-// messrust-disable-next-line CyclomaticComplexity
 fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>) -> usize {
     let mut deps = HashSet::new();
     for field in &t.fields {
-        for name in &field.type_names {
-            if !is_builtin_type(name) && name != &t.name {
-                deps.insert(name.clone());
-            }
-        }
+        add_type_dependencies(&mut deps, &field.type_names, &t.name);
     }
     for f in &model.functions {
-        if f.parent.as_deref() != Some(t.name.as_str()) {
+        if !f.counts_for_type_metrics || f.parent.as_deref() != Some(t.name.as_str()) {
             continue;
         }
-        for name in &f.dep_types {
-            if !is_builtin_type(name) && name != &t.name {
-                deps.insert(name.clone());
-            }
-        }
+        add_type_dependencies(&mut deps, &f.dep_types, &t.name);
     }
     deps.len()
 }
 
+fn add_type_dependencies(deps: &mut HashSet<String>, names: &[String], owner: &str) {
+    for name in names {
+        if !is_builtin_type(name) && name != owner {
+            deps.insert(name.clone());
+        }
+    }
+}
+
 #[derive(Default)]
-// messrust-disable-next-line LackOfCohesionOfMethods
 struct StaticMutCollector {
     static_muts: Vec<NamedSite>,
     mutated: HashSet<String>,
@@ -2649,7 +3054,6 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
     }
 }
 
-// messrust-disable-next-line CyclomaticComplexity,NPathComplexity
 fn lcom4(t: &TypeModel<'_>) -> usize {
     let field_names: HashSet<String> = t.fields.iter().map(|f| f.name.clone()).collect();
     let method_idx: HashMap<String, usize> = t
@@ -2658,31 +3062,8 @@ fn lcom4(t: &TypeModel<'_>) -> usize {
         .enumerate()
         .map(|(i, m)| (m.name.clone(), i))
         .collect();
-    let mut accessor_of: HashMap<String, String> = HashMap::new();
-    for m in &t.methods {
-        if let Some(field) = accessor_field(m, &field_names) {
-            accessor_of.insert(m.name.clone(), field);
-        }
-    }
-
-    let n = t.methods.len();
-    let mut parent: Vec<usize> = (0..n).collect();
-    let mut active = vec![false; n];
-    let mut field_owner: HashMap<String, usize> = HashMap::new();
-
-    fn find(parent: &mut [usize], x: usize) -> usize {
-        let mut x = x;
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        x
-    }
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let ra = find(parent, a);
-        let rb = find(parent, b);
-        parent[ra] = rb;
-    }
+    let accessor_of = accessor_fields(t, &field_names);
+    let mut graph = CohesionGraph::new(t.methods.len());
 
     for (i, m) in t.methods.iter().enumerate() {
         if accessor_of.contains_key(&m.name) {
@@ -2692,76 +3073,134 @@ fn lcom4(t: &TypeModel<'_>) -> usize {
             continue;
         };
         let (used_fields, called) = receiver_uses(body, &field_names, &method_idx);
-        for f in used_fields {
-            active[i] = true;
-            if let Some(owner) = field_owner.get(&f).copied() {
-                union(&mut parent, i, owner);
-            } else {
-                field_owner.insert(f, i);
-            }
-        }
-        for callee in called {
-            if let Some(field) = accessor_of.get(&callee) {
-                active[i] = true;
-                if let Some(owner) = field_owner.get(field).copied() {
-                    union(&mut parent, i, owner);
-                } else {
-                    field_owner.insert(field.clone(), i);
-                }
-            } else if let Some(&j) = method_idx.get(&callee) {
-                active[i] = true;
-                active[j] = true;
-                union(&mut parent, i, j);
-            }
-        }
+        connect_receiver_uses(
+            &mut graph,
+            i,
+            used_fields,
+            called,
+            &accessor_of,
+            &method_idx,
+        );
     }
+    graph.component_count()
+}
 
-    let mut roots = HashSet::new();
-    for (i, on) in active.iter().enumerate() {
-        if *on {
-            roots.insert(find(&mut parent, i));
+fn accessor_fields(
+    model: &TypeModel<'_>,
+    field_names: &HashSet<String>,
+) -> HashMap<String, String> {
+    let mut accessors = HashMap::new();
+    for method in &model.methods {
+        if let Some(field) = accessor_field(method, field_names) {
+            accessors.insert(method.name.clone(), field);
         }
     }
-    if roots.is_empty() {
-        1
-    } else {
-        roots.len()
+    accessors
+}
+
+fn connect_receiver_uses(
+    graph: &mut CohesionGraph,
+    method: usize,
+    used_fields: Vec<String>,
+    called_methods: Vec<String>,
+    accessors: &HashMap<String, String>,
+    method_indexes: &HashMap<String, usize>,
+) {
+    for field in used_fields {
+        graph.connect_field(method, field);
+    }
+    for called in called_methods {
+        if let Some(field) = accessors.get(&called) {
+            graph.connect_field(method, field.clone());
+        } else if let Some(called_method) = method_indexes.get(&called) {
+            graph.connect_methods(method, *called_method);
+        }
     }
 }
 
-// messrust-disable-next-line CyclomaticComplexity
+struct CohesionGraph {
+    parent: Vec<usize>,
+    active: Vec<bool>,
+    field_owner: HashMap<String, usize>,
+}
+
+impl CohesionGraph {
+    fn new(method_count: usize) -> Self {
+        Self {
+            parent: (0..method_count).collect(),
+            active: vec![false; method_count],
+            field_owner: HashMap::new(),
+        }
+    }
+
+    fn find(&mut self, mut method: usize) -> usize {
+        while self.parent[method] != method {
+            self.parent[method] = self.parent[self.parent[method]];
+            method = self.parent[method];
+        }
+        method
+    }
+
+    fn union(&mut self, left: usize, right: usize) {
+        let left_root = self.find(left);
+        let right_root = self.find(right);
+        self.parent[left_root] = right_root;
+    }
+
+    fn connect_field(&mut self, method: usize, field: String) {
+        self.active[method] = true;
+        if let Some(owner) = self.field_owner.get(&field).copied() {
+            self.union(method, owner);
+        } else {
+            self.field_owner.insert(field, method);
+        }
+    }
+
+    fn connect_methods(&mut self, caller: usize, called: usize) {
+        self.active[caller] = true;
+        self.active[called] = true;
+        self.union(caller, called);
+    }
+
+    fn component_count(mut self) -> usize {
+        let mut roots = HashSet::new();
+        for method in 0..self.active.len() {
+            if self.active[method] {
+                roots.insert(self.find(method));
+            }
+        }
+        roots.len().max(1)
+    }
+}
+
 fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Option<String> {
     let body = m.body?;
     if body.stmts.len() != 1 {
         return None;
     }
     match &body.stmts[0] {
-        syn::Stmt::Expr(syn::Expr::Field(f), _) => {
-            if let (syn::Expr::Path(p), Member::Named(ident)) = (&*f.base, &f.member) {
-                if path_is_self(p) {
-                    let name = ident.to_string();
-                    if fields.contains(&name) {
-                        return Some(name);
-                    }
-                }
-            }
-            None
-        }
-        syn::Stmt::Expr(syn::Expr::Assign(a), _) => {
-            if let syn::Expr::Field(f) = &*a.left {
-                if let (syn::Expr::Path(p), Member::Named(ident)) = (&*f.base, &f.member) {
-                    if path_is_self(p) {
-                        let name = ident.to_string();
-                        if fields.contains(&name) {
-                            return Some(name);
-                        }
-                    }
-                }
-            }
-            None
-        }
+        syn::Stmt::Expr(syn::Expr::Field(field), _) => receiver_field(field, fields),
+        syn::Stmt::Expr(syn::Expr::Assign(assign), _) => assigned_receiver_field(assign, fields),
         _ => None,
     }
+}
+
+fn assigned_receiver_field(
+    assignment: &syn::ExprAssign,
+    fields: &HashSet<String>,
+) -> Option<String> {
+    let syn::Expr::Field(field) = &*assignment.left else {
+        return None;
+    };
+    receiver_field(field, fields)
+}
+
+fn receiver_field(field: &syn::ExprField, fields: &HashSet<String>) -> Option<String> {
+    let (syn::Expr::Path(base), Member::Named(identifier)) = (&*field.base, &field.member) else {
+        return None;
+    };
+    let name = identifier.to_string();
+    (path_is_self(base) && fields.contains(&name)).then_some(name)
 }
 
 fn path_is_self(path: &syn::ExprPath) -> bool {
@@ -2789,7 +3228,6 @@ fn receiver_uses(
     (used_fields, called)
 }
 
-// messrust-disable-next-line LackOfCohesionOfMethods
 struct ReceiverUseCollector<'a> {
     fields: &'a HashSet<String>,
     methods: &'a HashMap<String, usize>,
