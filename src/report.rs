@@ -1,5 +1,4 @@
 //! Report model and family format renderers (messgo / PHPMD shapes).
-// messrust-disable UnusedLocalVariable,UnusedPrivateField
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -92,8 +91,8 @@ pub fn render(
             write_format(effective, colored, report, stdout).map_err(|e| e.to_string())?;
         }
         WriteTarget::File(path) => {
-            let mut f = std::fs::File::create(&path)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
+            let mut f =
+                std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             write_format(effective, colored, report, &mut f).map_err(|e| e.to_string())?;
         }
     }

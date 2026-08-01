@@ -348,6 +348,30 @@ struct Foo {
 }
 
 #[test]
+fn coupling_between_objects_ignores_required_trait_method_signatures() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "visitor.rs",
+        r#"
+struct A; struct B; struct C; struct D; struct E; struct F; struct G;
+struct H; struct I; struct J; struct K; struct L; struct M; struct N;
+trait Visit {
+    fn visit(&mut self, a: A, b: B, c: C, d: D, e: E, f: F, g: G,
+             h: H, i: I, j: J, k: K, l: L, m: M, n: N);
+}
+struct Collector;
+impl Visit for Collector {
+    fn visit(&mut self, _a: A, _b: B, _c: C, _d: D, _e: E, _f: F, _g: G,
+             _h: H, _i: I, _j: J, _k: K, _l: L, _m: M, _n: N) {}
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "CouplingBetweenObjects");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
 fn global_variable_reports_mutated_static_mut() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
@@ -448,6 +472,31 @@ struct Counter {
 impl Counter {
     fn bump(&mut self) { self.value += 1; }
     fn get(&self) -> i32 { self.value }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn lack_of_cohesion_ignores_required_trait_methods() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "visitor.rs",
+        r#"
+trait Visit {
+    fn visit_left(&mut self);
+    fn visit_right(&mut self);
+}
+struct Collector {
+    left: i32,
+    right: i32,
+}
+impl Visit for Collector {
+    fn visit_left(&mut self) { self.left += 1; }
+    fn visit_right(&mut self) { self.right += 1; }
 }
 "#,
     );
