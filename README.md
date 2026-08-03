@@ -157,6 +157,38 @@ The component catalog is adapted to Rust syntax and semantics:
 - [Design](docs/design-adaptations.md)
 - [Controversial rules](docs/controversial-adaptations.md)
 
+## Mutation testing
+
+Install the released mutation tool, the coverage helper, and the LLVM tools
+component:
+
+```text
+cargo install mutarust --locked --version 0.1.1
+cargo install cargo-llvm-cov --locked
+rustup component add llvm-tools-preview
+```
+
+The committed policy file is `mutarust.yml`. It sets `min_msi: 75` and
+`min_covered_msi: 80`. These thresholds do not move down.
+
+The selected target is `.`. `mutarust --list-files .` lists every production
+source file under `src`.
+
+Measure the whole crate with the same thresholds as the future CI gate. Skip
+the packaging smoke test so each mutant does not run `cargo install`:
+
+```text
+mutarust --config mutarust.yml --coverage --min-msi 75 --min-covered-msi 80 \
+  --test-flags "-- --skip pack_install_smoke" .
+```
+
+Measure one module with the same options and a file target:
+
+```text
+mutarust --config mutarust.yml --coverage --min-msi 75 --min-covered-msi 80 \
+  --test-flags "-- --skip pack_install_smoke" src/main.rs
+```
+
 ## Development
 
 Run the complete verification suite with:
