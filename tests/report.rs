@@ -64,7 +64,7 @@ fn priority_ruleset(dir: &Path, priority: u8) -> PathBuf {
 }
 
 fn assert_recent_timestamp(ts: &str) {
-    let parts: Vec<&str> = ts.split(|c| c == '-' || c == 'T' || c == ':' || c == 'Z').collect();
+    let parts: Vec<&str> = ts.split(['-', 'T', ':', 'Z']).collect();
     assert_eq!(
         parts.len(),
         7,
