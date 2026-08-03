@@ -401,6 +401,52 @@ fn json_format_includes_errors_and_groups_files_in_first_seen_order() {
 }
 
 #[test]
+fn json_format_groups_two_violations_in_the_same_file() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fixture.rs",
+        &(fn_with_n_params("first", 11) + &fn_with_n_params("second", 12)),
+    );
+    let file = path.to_str().unwrap();
+    let (code, out, err) = run_cli(&[file, "json", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let files = v["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1, "same file must be one entry: {out}");
+    assert_eq!(files[0]["file"], file);
+    assert_eq!(files[0]["violations"].as_array().unwrap().len(), 2);
+    assert_eq!(files[0]["violations"][0]["function"], "first");
+    assert_eq!(files[0]["violations"][1]["function"], "second");
+}
+
+#[test]
+fn color_flag_does_not_rewrite_non_text_formats() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let file = path.to_str().unwrap();
+
+    let (code, out, err) = run_cli(&[file, "github", "codesize", "--color"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        out,
+        format!(
+            "::warning file={file},line=1,col=1::{} (ExcessiveParameterList)\n",
+            param_list_message("entry_point", 11)
+        )
+    );
+
+    let (code, out, err) = run_cli(&[file, "json", "codesize", "--color"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(!out.contains('\u{1b}'), "json must stay uncolored: {out}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["package"], "messrust");
+    assert_eq!(v["files"][0]["violations"][0]["rule"], "ExcessiveParameterList");
+}
+
+#[test]
 fn json_format_marks_suppressed_true_under_strict() {
     let dir = TempDir::new().unwrap();
     let source = format!(
@@ -669,6 +715,31 @@ fn xml_format_prints_pmd_document_with_escaped_paths() {
     assert!(!out.contains(" package="), "empty package must be omitted");
     assert!(!out.contains(" externalInfoUrl="), "empty url must be omitted");
     assert!(out.ends_with("</pmd>\n"));
+}
+
+#[test]
+fn xml_format_closes_each_file_element_in_a_multi_file_report() {
+    let dir = TempDir::new().unwrap();
+    write_file(dir.path(), "a.rs", &fn_with_n_params("a", 11));
+    write_file(dir.path(), "b.rs", &fn_with_n_params("b", 12));
+    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "xml", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    let a = dir.path().join("a.rs");
+    let b = dir.path().join("b.rs");
+    let expected_files = format!(
+        "  <file name=\"{}\">\n    <violation beginline=\"1\" endline=\"1\" rule=\"ExcessiveParameterList\" ruleset=\"Code Size Rules\" function=\"a\" priority=\"3\" suppressed=\"false\">\n      {}\n    </violation>\n  </file>\n  <file name=\"{}\">\n    <violation beginline=\"1\" endline=\"1\" rule=\"ExcessiveParameterList\" ruleset=\"Code Size Rules\" function=\"b\" priority=\"3\" suppressed=\"false\">\n      {}\n    </violation>\n  </file>\n</pmd>\n",
+        a.display(),
+        param_list_message("a", 11),
+        b.display(),
+        param_list_message("b", 12),
+    );
+    assert!(
+        out.ends_with(&expected_files),
+        "multi-file xml must close each file element:\n{out}"
+    );
+    assert_eq!(out.matches("</file>").count(), 2, "out={out}");
+    assert_eq!(out.matches("<file ").count(), 2, "out={out}");
 }
 
 #[test]
