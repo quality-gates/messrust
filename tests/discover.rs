@@ -31,7 +31,7 @@ fn write_file(dir: &Path, rel: &str, contents: &str) -> PathBuf {
     path
 }
 
-fn hot(n: usize) -> String {
+fn fn_with_n_params(n: usize) -> String {
     let params: Vec<String> = (0..n).map(|i| format!("param_{i}: i32")).collect();
     format!("fn entry_point({}) {{}}\n", params.join(", "))
 }
@@ -86,7 +86,7 @@ fn missing_path_exits_one_and_names_the_path_on_stderr() {
 #[test]
 fn single_rust_file_path_is_analyzed() {
     let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "only.rs", &hot(11));
+    let path = write_file(dir.path(), "only.rs", &fn_with_n_params(11));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert_eq!(reported_basenames(&out), vec!["only.rs".to_string()]);
@@ -95,9 +95,9 @@ fn single_rust_file_path_is_analyzed() {
 #[test]
 fn directory_finds_nested_rs_files_in_sorted_order() {
     let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "z/z.rs", &hot(11));
-    write_file(dir.path(), "a/a.rs", &hot(12));
-    write_file(dir.path(), "m/m.rs", &hot(13));
+    write_file(dir.path(), "z/z.rs", &fn_with_n_params(11));
+    write_file(dir.path(), "a/a.rs", &fn_with_n_params(12));
+    write_file(dir.path(), "m/m.rs", &fn_with_n_params(13));
     let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     let report: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -137,10 +137,10 @@ fn discovery_sort_orders_processing_errors() {
 #[test]
 fn skips_target_git_and_node_modules_each_by_name() {
     let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "keep.rs", &hot(11));
-    write_file(dir.path(), "target/from_target.rs", &hot(12));
-    write_file(dir.path(), ".git/from_git.rs", &hot(13));
-    write_file(dir.path(), "node_modules/from_nm.rs", &hot(14));
+    write_file(dir.path(), "keep.rs", &fn_with_n_params(11));
+    write_file(dir.path(), "target/from_target.rs", &fn_with_n_params(12));
+    write_file(dir.path(), ".git/from_git.rs", &fn_with_n_params(13));
+    write_file(dir.path(), "node_modules/from_nm.rs", &fn_with_n_params(14));
     let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert_eq!(reported_basenames(&out), vec!["keep.rs".to_string()]);
@@ -153,7 +153,7 @@ fn skips_target_git_and_node_modules_each_by_name() {
 fn non_directory_entry_named_like_a_skip_dir_is_still_read() {
     // walk_entry_allowed must not apply directory skip names to files.
     let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "pkg/.git", &hot(11));
+    let path = write_file(dir.path(), "pkg/.git", &fn_with_n_params(11));
     let (code, out, err) = run_cli(&[
         dir.path().to_str().unwrap(),
         "json",
@@ -168,7 +168,7 @@ fn non_directory_entry_named_like_a_skip_dir_is_still_read() {
 #[test]
 fn directory_whose_name_ends_with_rs_is_not_analyzed_as_a_file() {
     let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "real.rs", &hot(11));
+    write_file(dir.path(), "real.rs", &fn_with_n_params(11));
     fs::create_dir_all(dir.path().join("fake.rs")).unwrap();
     let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -189,7 +189,7 @@ fn ignore_tests_on_direct_file_path_skips_conventional_test_names() {
         "widget_test.rs",
     ];
     for name in cases {
-        let path = write_file(dir.path(), name, &hot(11));
+        let path = write_file(dir.path(), name, &fn_with_n_params(11));
         let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
         assert_eq!(code, EXIT_VIOLATION, "without ignore-tests name={name} stderr={err:?}");
         assert_eq!(
@@ -215,7 +215,7 @@ fn ignore_tests_on_direct_file_path_skips_conventional_test_names() {
 #[test]
 fn ignore_tests_on_direct_path_skips_file_under_tests_directory() {
     let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "tests/integration.rs", &hot(11));
+    let path = write_file(dir.path(), "tests/integration.rs", &fn_with_n_params(11));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert_eq!(reported_basenames(&out), vec!["integration.rs".to_string()]);
@@ -233,10 +233,10 @@ fn ignore_tests_on_direct_path_skips_file_under_tests_directory() {
 #[test]
 fn ignore_tests_skips_files_under_test_tests_and_dunder_tests_dirs() {
     let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "src/lib.rs", &hot(11));
-    write_file(dir.path(), "test/unit.rs", &hot(12));
-    write_file(dir.path(), "tests/integration.rs", &hot(13));
-    write_file(dir.path(), "__tests__/spec.rs", &hot(14));
+    write_file(dir.path(), "src/lib.rs", &fn_with_n_params(11));
+    write_file(dir.path(), "test/unit.rs", &fn_with_n_params(12));
+    write_file(dir.path(), "tests/integration.rs", &fn_with_n_params(13));
+    write_file(dir.path(), "__tests__/spec.rs", &fn_with_n_params(14));
     let (code, out, err) = run_cli(&[
         dir.path().to_str().unwrap(),
         "json",
@@ -250,9 +250,9 @@ fn ignore_tests_skips_files_under_test_tests_and_dunder_tests_dirs() {
 #[test]
 fn exclude_and_suffixes_select_exact_file_set() {
     let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "src/keep.rs", &hot(11));
-    write_file(dir.path(), "src/notes.txt", &hot(12));
-    write_file(dir.path(), "vendor/skip.rs", &hot(13));
+    write_file(dir.path(), "src/keep.rs", &fn_with_n_params(11));
+    write_file(dir.path(), "src/notes.txt", &fn_with_n_params(12));
+    write_file(dir.path(), "vendor/skip.rs", &fn_with_n_params(13));
     let (code, out, err) = run_cli(&[
         dir.path().to_str().unwrap(),
         "json",
@@ -275,9 +275,19 @@ fn exclude_and_suffixes_select_exact_file_set() {
 }
 
 #[test]
+fn directory_with_only_non_rust_files_finds_nothing() {
+    let dir = TempDir::new().unwrap();
+    write_file(dir.path(), "readme.md", &fn_with_n_params(11));
+    write_file(dir.path(), "notes.txt", &fn_with_n_params(12));
+    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "json", "codesize"]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(reported_basenames(&out).is_empty(), "stdout={out}");
+}
+
+#[test]
 fn duplicate_path_arguments_analyze_a_file_once() {
     let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "once.rs", &hot(11));
+    let path = write_file(dir.path(), "once.rs", &fn_with_n_params(11));
     let paths = format!("{},{}", path.to_str().unwrap(), path.to_str().unwrap());
     let (code, out, err) = run_cli(&[&paths, "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
