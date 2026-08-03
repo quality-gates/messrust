@@ -1,4 +1,4 @@
-//! Walkers and metrics helpers for design rules.
+//! Design-rule AST walkers and cohesion/coupling metrics.
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,13 +18,13 @@ pub(crate) fn exit_expression_line(body: &syn::Block) -> Option<usize> {
 }
 
 
-pub(crate) struct ExitCallCollector<'a> {
-    pub(crate) hit: &'a mut Option<usize>,
+struct ExitCallCollector<'a> {
+    hit: &'a mut Option<usize>,
 }
 
 
 impl ExitCallCollector<'_> {
-    pub(crate) fn consider_path(&mut self, path: &syn::Path, line: usize) {
+    fn consider_path(&mut self, path: &syn::Path, line: usize) {
         if self.hit.is_some() {
             return;
         }
@@ -87,13 +87,13 @@ pub(crate) fn count_in_loop_hits(body: &syn::Block) -> Vec<CountLoopHit> {
 }
 
 
-pub(crate) struct CountInLoopCollector<'a> {
-    pub(crate) hits: &'a mut Vec<CountLoopHit>,
+struct CountInLoopCollector<'a> {
+    hits: &'a mut Vec<CountLoopHit>,
 }
 
 
 impl CountInLoopCollector<'_> {
-    pub(crate) fn scan_expr(&mut self, expr: &syn::Expr, loop_kind: &str) {
+    fn scan_expr(&mut self, expr: &syn::Expr, loop_kind: &str) {
         let mut finder = LenCallFinder {
             hits: self.hits,
             loop_kind: loop_kind.to_string(),
@@ -121,9 +121,9 @@ impl<'ast> Visit<'ast> for CountInLoopCollector<'_> {
 }
 
 
-pub(crate) struct LenCallFinder<'a> {
-    pub(crate) hits: &'a mut Vec<CountLoopHit>,
-    pub(crate) loop_kind: String,
+struct LenCallFinder<'a> {
+    hits: &'a mut Vec<CountLoopHit>,
+    loop_kind: String,
 }
 
 
@@ -180,14 +180,14 @@ pub(crate) fn development_fragment_hits(body: &syn::Block, unwanted: &HashSet<St
 }
 
 
-pub(crate) struct DevFragmentCollector<'a> {
-    pub(crate) unwanted: &'a HashSet<String>,
-    pub(crate) hits: &'a mut Vec<DevHit>,
+struct DevFragmentCollector<'a> {
+    unwanted: &'a HashSet<String>,
+    hits: &'a mut Vec<DevHit>,
 }
 
 
 impl DevFragmentCollector<'_> {
-    pub(crate) fn consider(&mut self, name: &str, line: usize) {
+    fn consider(&mut self, name: &str, line: usize) {
         if self.unwanted.contains(&name.to_ascii_lowercase()) {
             self.hits.push(DevHit {
                 line,
@@ -235,17 +235,17 @@ pub(crate) fn empty_catch_lines(body: &syn::Block) -> Vec<usize> {
 }
 
 
-pub(crate) struct EmptyCatchCollector<'a> {
-    pub(crate) lines: &'a mut Vec<usize>,
+struct EmptyCatchCollector<'a> {
+    lines: &'a mut Vec<usize>,
 }
 
 
-pub(crate) fn block_is_empty(block: &syn::Block) -> bool {
+fn block_is_empty(block: &syn::Block) -> bool {
     block.stmts.is_empty()
 }
 
 
-pub(crate) fn expr_is_empty_block(expr: &syn::Expr) -> bool {
+fn expr_is_empty_block(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Block(b) => block_is_empty(&b.block),
         syn::Expr::Tuple(t) if t.elems.is_empty() => true,
@@ -254,7 +254,7 @@ pub(crate) fn expr_is_empty_block(expr: &syn::Expr) -> bool {
 }
 
 
-pub(crate) fn pat_is_err(pat: &Pat) -> bool {
+fn pat_is_err(pat: &Pat) -> bool {
     match pat {
         Pat::TupleStruct(ts) => ts.path.segments.last().is_some_and(|s| s.ident == "Err"),
         Pat::Ident(id) => id.ident == "Err",
@@ -303,7 +303,7 @@ pub(crate) fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>)
 }
 
 
-pub(crate) fn add_type_dependencies(deps: &mut HashSet<String>, names: &[String], owner: &str) {
+fn add_type_dependencies(deps: &mut HashSet<String>, names: &[String], owner: &str) {
     for name in names {
         if !is_builtin_type(name) && name != owner {
             deps.insert(name.clone());
@@ -345,7 +345,7 @@ pub(crate) fn lcom4(t: &TypeModel<'_>) -> usize {
 }
 
 
-pub(crate) fn accessor_fields(
+fn accessor_fields(
     model: &TypeModel<'_>,
     field_names: &HashSet<String>,
 ) -> HashMap<String, String> {
@@ -359,7 +359,7 @@ pub(crate) fn accessor_fields(
 }
 
 
-pub(crate) fn connect_receiver_uses(
+fn connect_receiver_uses(
     graph: &mut CohesionGraph,
     method: usize,
     used_fields: Vec<String>,
@@ -380,15 +380,15 @@ pub(crate) fn connect_receiver_uses(
 }
 
 
-pub(crate) struct CohesionGraph {
-    pub(crate) parent: Vec<usize>,
-    pub(crate) active: Vec<bool>,
-    pub(crate) field_owner: HashMap<String, usize>,
+struct CohesionGraph {
+    parent: Vec<usize>,
+    active: Vec<bool>,
+    field_owner: HashMap<String, usize>,
 }
 
 
 impl CohesionGraph {
-    pub(crate) fn new(method_count: usize) -> Self {
+    fn new(method_count: usize) -> Self {
         Self {
             parent: (0..method_count).collect(),
             active: vec![false; method_count],
@@ -396,7 +396,7 @@ impl CohesionGraph {
         }
     }
 
-    pub(crate) fn find(&mut self, mut method: usize) -> usize {
+    fn find(&mut self, mut method: usize) -> usize {
         while self.parent[method] != method {
             self.parent[method] = self.parent[self.parent[method]];
             method = self.parent[method];
@@ -404,13 +404,13 @@ impl CohesionGraph {
         method
     }
 
-    pub(crate) fn union(&mut self, left: usize, right: usize) {
+    fn union(&mut self, left: usize, right: usize) {
         let left_root = self.find(left);
         let right_root = self.find(right);
         self.parent[left_root] = right_root;
     }
 
-    pub(crate) fn connect_field(&mut self, method: usize, field: String) {
+    fn connect_field(&mut self, method: usize, field: String) {
         self.active[method] = true;
         if let Some(owner) = self.field_owner.get(&field).copied() {
             self.union(method, owner);
@@ -419,13 +419,13 @@ impl CohesionGraph {
         }
     }
 
-    pub(crate) fn connect_methods(&mut self, caller: usize, called: usize) {
+    fn connect_methods(&mut self, caller: usize, called: usize) {
         self.active[caller] = true;
         self.active[called] = true;
         self.union(caller, called);
     }
 
-    pub(crate) fn component_count(mut self) -> usize {
+    fn component_count(mut self) -> usize {
         let mut roots = HashSet::new();
         for method in 0..self.active.len() {
             if self.active[method] {
@@ -437,7 +437,7 @@ impl CohesionGraph {
 }
 
 
-pub(crate) fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Option<String> {
+fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Option<String> {
     let body = m.body?;
     if body.stmts.len() != 1 {
         return None;
@@ -450,7 +450,7 @@ pub(crate) fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Opt
 }
 
 
-pub(crate) fn assigned_receiver_field(
+fn assigned_receiver_field(
     assignment: &syn::ExprAssign,
     fields: &HashSet<String>,
 ) -> Option<String> {
@@ -461,7 +461,7 @@ pub(crate) fn assigned_receiver_field(
 }
 
 
-pub(crate) fn receiver_field(field: &syn::ExprField, fields: &HashSet<String>) -> Option<String> {
+fn receiver_field(field: &syn::ExprField, fields: &HashSet<String>) -> Option<String> {
     let (syn::Expr::Path(base), Member::Named(identifier)) = (&*field.base, &field.member) else {
         return None;
     };
@@ -470,12 +470,12 @@ pub(crate) fn receiver_field(field: &syn::ExprField, fields: &HashSet<String>) -
 }
 
 
-pub(crate) fn path_is_self(path: &syn::ExprPath) -> bool {
+fn path_is_self(path: &syn::ExprPath) -> bool {
     path_single_ident(path).as_deref() == Some("self")
 }
 
 
-pub(crate) fn receiver_uses(
+fn receiver_uses(
     body: &syn::Block,
     fields: &HashSet<String>,
     methods: &HashMap<String, usize>,
@@ -497,11 +497,11 @@ pub(crate) fn receiver_uses(
 }
 
 
-pub(crate) struct ReceiverUseCollector<'a> {
-    pub(crate) fields: &'a HashSet<String>,
-    pub(crate) methods: &'a HashMap<String, usize>,
-    pub(crate) used_fields: &'a mut Vec<String>,
-    pub(crate) called: &'a mut Vec<String>,
+struct ReceiverUseCollector<'a> {
+    fields: &'a HashSet<String>,
+    methods: &'a HashMap<String, usize>,
+    used_fields: &'a mut Vec<String>,
+    called: &'a mut Vec<String>,
 }
 
 

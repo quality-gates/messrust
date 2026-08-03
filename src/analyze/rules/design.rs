@@ -8,7 +8,7 @@ use crate::analyze::helpers::{
 };
 use crate::analyze::model::FileModel;
 
-use super::design_support::{
+use super::design_metrics::{
     count_in_loop_hits, coupling_between_objects, development_fragment_hits, empty_catch_lines,
     exit_expression_line, lcom4, unwanted_function_set,
 };
@@ -38,9 +38,6 @@ pub(crate) fn apply_exit_expression(
         }
     }
 }
-
-// Rust has no goto; keep the rule loadable and quiet.
-
 
 // Rust has no goto; keep the rule loadable and quiet.
 pub(crate) fn apply_goto_statement(
