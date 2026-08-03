@@ -50,7 +50,7 @@ fn discover_dir(
 ) -> Result<(), String> {
     let entries = WalkDir::new(path)
         .into_iter()
-        .filter_entry(|entry| walk_entry_allowed(entry, opts.ignore_tests));
+        .filter_entry(walk_entry_allowed);
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let candidate = entry.path();
@@ -65,12 +65,12 @@ fn discover_dir(
     Ok(())
 }
 
-fn walk_entry_allowed(entry: &DirEntry, ignore_tests: bool) -> bool {
+fn walk_entry_allowed(entry: &DirEntry) -> bool {
     if !entry.file_type().is_dir() {
         return true;
     }
     let name = entry.file_name().to_string_lossy();
-    !should_skip_dir(&name) && (!ignore_tests || !is_test_dir(&name))
+    !should_skip_dir(&name)
 }
 
 fn push_unique(
