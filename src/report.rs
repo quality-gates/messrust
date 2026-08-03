@@ -180,6 +180,7 @@ fn xml_escape(s: &str) -> String {
 }
 
 fn timestamp() -> String {
+    use std::mem::MaybeUninit;
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -188,23 +189,12 @@ fn timestamp() -> String {
     // Delegate civil UTC conversion to libc. Hand-rolled calendar arithmetic
     // is not reachable with distinct observable outputs through the command
     // seam (wall-clock inputs make most mutants equivalent).
-    let mut tm = libc::tm {
-        tm_sec: 0,
-        tm_min: 0,
-        tm_hour: 0,
-        tm_mday: 0,
-        tm_mon: 0,
-        tm_year: 0,
-        tm_wday: 0,
-        tm_yday: 0,
-        tm_isdst: 0,
-        tm_gmtoff: 0,
-        tm_zone: std::ptr::null_mut(),
-    };
-    let ok = unsafe { !libc::gmtime_r(&secs, &mut tm).is_null() };
+    let mut tm = MaybeUninit::<libc::tm>::uninit();
+    let ok = unsafe { !libc::gmtime_r(&secs, tm.as_mut_ptr()).is_null() };
     if !ok {
         return "1970-01-01T00:00:00Z".to_string();
     }
+    let tm = unsafe { tm.assume_init() };
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         tm.tm_year + 1900,
