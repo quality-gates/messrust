@@ -79,21 +79,21 @@ pub fn render(
     target: WriteTarget,
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
-    let colored = format == "ansi" || (format == "text" && color);
-    let effective = if format == "text" && color {
-        "ansi"
-    } else {
-        format
+    // `text` and `ansi` share one writer; only those formats read `colored`.
+    let colored = match format {
+        "ansi" => true,
+        "text" => color,
+        _ => false,
     };
 
     match target {
         WriteTarget::Stdout => {
-            write_format(effective, colored, report, stdout).map_err(|e| e.to_string())?;
+            write_format(format, colored, report, stdout).map_err(|e| e.to_string())?;
         }
         WriteTarget::File(path) => {
             let mut f =
                 std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            write_format(effective, colored, report, &mut f).map_err(|e| e.to_string())?;
+            write_format(format, colored, report, &mut f).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -121,38 +121,40 @@ fn write_format(
 fn write_text(report: &Report, colored: bool, out: &mut dyn Write) -> std::io::Result<()> {
     const SPACING: usize = 2;
 
-    let locations: Vec<String> = report
-        .violations
-        .iter()
-        .map(|v| format!("{}:{}", v.file, v.begin_line))
-        .collect();
-    let loc_width = locations.iter().map(|s| s.len()).max().unwrap_or(0);
-    let rule_labels: Vec<String> = report
-        .violations
-        .iter()
-        .map(|v| {
-            if v.suppressed {
-                format!("{} [suppressed]", v.rule_name)
-            } else {
-                v.rule_name.clone()
-            }
-        })
-        .collect();
-    let rule_width = rule_labels.iter().map(String::len).max().unwrap_or(0);
+    if !report.violations.is_empty() {
+        let locations: Vec<String> = report
+            .violations
+            .iter()
+            .map(|v| format!("{}:{}", v.file, v.begin_line))
+            .collect();
+        let loc_width = locations.iter().map(|s| s.len()).max().unwrap();
+        let rule_labels: Vec<String> = report
+            .violations
+            .iter()
+            .map(|v| {
+                if v.suppressed {
+                    format!("{} [suppressed]", v.rule_name)
+                } else {
+                    v.rule_name.clone()
+                }
+            })
+            .collect();
+        let rule_width = rule_labels.iter().map(String::len).max().unwrap();
 
-    for ((v, loc), rule_label) in report
-        .violations
-        .iter()
-        .zip(locations.iter())
-        .zip(rule_labels.iter())
-    {
-        let pad1 = " ".repeat(loc_width.saturating_sub(loc.len()) + SPACING);
-        let pad2 = " ".repeat(rule_width.saturating_sub(rule_label.len()) + SPACING);
-        write!(out, "{loc}{pad1}")?;
-        write!(out, "{}", colorize(rule_label, "33", colored))?;
-        write!(out, "{pad2}")?;
-        write!(out, "{}", colorize(&v.description, "31", colored))?;
-        writeln!(out)?;
+        for ((v, loc), rule_label) in report
+            .violations
+            .iter()
+            .zip(locations.iter())
+            .zip(rule_labels.iter())
+        {
+            let pad1 = " ".repeat(loc_width.saturating_sub(loc.len()) + SPACING);
+            let pad2 = " ".repeat(rule_width.saturating_sub(rule_label.len()) + SPACING);
+            write!(out, "{loc}{pad1}")?;
+            write!(out, "{}", colorize(rule_label, "33", colored))?;
+            write!(out, "{pad2}")?;
+            write!(out, "{}", colorize(&v.description, "31", colored))?;
+            writeln!(out)?;
+        }
     }
 
     for err in &report.errors {
@@ -178,34 +180,30 @@ fn xml_escape(s: &str) -> String {
 }
 
 fn timestamp() -> String {
+    use std::mem::MaybeUninit;
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // RFC3339-ish UTC without pulling in a clock crate.
-    let days = secs / 86400;
-    let tod = secs % 86400;
-    let (y, m, d) = civil_from_days(days as i64);
-    let hh = tod / 3600;
-    let mm = (tod % 3600) / 60;
-    let ss = tod % 60;
-    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
-}
-
-/// Civil date from days since Unix epoch (Howard Hinnant algorithm).
-fn civil_from_days(days: i64) -> (i32, u32, u32) {
-    let z = days + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y as i32, m, d)
+        .unwrap_or(0) as i64;
+    // Delegate civil UTC conversion to libc. Hand-rolled calendar arithmetic
+    // is not reachable with distinct observable outputs through the command
+    // seam (wall-clock inputs make most mutants equivalent).
+    let mut tm = MaybeUninit::<libc::tm>::uninit();
+    let ok = unsafe { !libc::gmtime_r(&secs, tm.as_mut_ptr()).is_null() };
+    if !ok {
+        return "1970-01-01T00:00:00Z".to_string();
+    }
+    let tm = unsafe { tm.assume_init() };
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    )
 }
 
 fn version() -> &'static str {
@@ -307,7 +305,7 @@ fn write_json(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
 
 fn reindent_json(s: &str) -> String {
     // Convert 2-space pretty JSON to 4-space like messgo's encoding/json.
-    let mut out = String::with_capacity(s.len() * 2);
+    let mut out = String::new();
     for line in s.lines() {
         let trimmed = line.trim_start_matches(' ');
         let spaces = line.len() - trimmed.len();
@@ -559,12 +557,11 @@ fn format_description(v: &Violation) -> String {
 // ----- SARIF 2.1.0 --------------------------------------------------------
 
 fn write_sarif(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
-    let mut seen = BTreeMap::new();
+    let mut seen = std::collections::BTreeSet::new();
     let mut rules = Vec::new();
     let mut results = Vec::new();
     for v in &report.violations {
-        if !seen.contains_key(&v.rule_name) {
-            seen.insert(v.rule_name.clone(), true);
+        if seen.insert(v.rule_name.clone()) {
             rules.push(serde_json::json!({
                 "id": v.rule_name,
                 "name": v.rule_name,
