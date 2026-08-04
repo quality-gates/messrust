@@ -310,17 +310,13 @@ impl<'ast> Visit<'ast> for StaticAccessCollector<'_> {
 
 
 pub(crate) fn static_receiver_type(path: &syn::Path) -> Option<String> {
-    if path.segments.len() < 2 {
-        return None;
-    }
     // Prefer the rightmost PascalCase segment before the final call name.
-    let mut segs: Vec<_> = path.segments.iter().collect();
-    segs.pop()?; // method / associated fn name
-    for seg in segs.into_iter().rev() {
+    // `Self` is PascalCase, so it is returned here and filtered in
+    // `StaticAccessCollector::consider_path` (same observable skip).
+    let mut segs = path.segments.iter();
+    let _method = segs.next_back()?;
+    for seg in segs.rev() {
         let name = seg.ident.to_string();
-        if name == "Self" {
-            return Some(name);
-        }
         if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
             return Some(name);
         }

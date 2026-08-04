@@ -112,6 +112,29 @@ fn boolean_argument_flag_skips_underscore_and_non_bool() {
 }
 
 #[test]
+fn boolean_argument_flag_reports_later_bool_after_underscore_param() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mixed.rs",
+        "fn process(_skip: bool, flag: bool) {\n    let _ = (_skip, flag);\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "BooleanArgumentFlag");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "BooleanArgumentFlag",
+        "The method process has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.",
+    );
+    assert!(
+        !out.contains("argument _skip"),
+        "underscore param must stay quiet: stdout={out:?}"
+    );
+}
+
+#[test]
 fn boolean_argument_flag_honours_exceptions_on_enclosing_type() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
