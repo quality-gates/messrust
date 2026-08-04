@@ -1,4 +1,8 @@
 //! cleancode rules through the injectable CLI entry.
+//!
+//! Seam: `messrust::run`. Each test asserts the exit code and the user-visible
+//! text (location line, rule name, and message). Properties such as
+//! `exceptions` and `ignorepattern` are exercised as separate cases.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +35,19 @@ fn run_only(path: &Path, rule: &str) -> (i32, String, String) {
     run_cli(&[path.to_str().unwrap(), "text", "cleancode", "--only", rule])
 }
 
+fn assert_finding(out: &str, path: &Path, line: usize, rule: &str, message: &str) {
+    let loc = format!("{}:{line}", path.display());
+    assert!(
+        out.contains(&loc),
+        "missing location {loc} in stdout={out:?}"
+    );
+    assert!(out.contains(rule), "missing rule {rule} in stdout={out:?}");
+    assert!(
+        out.contains(message),
+        "missing message {message:?} in stdout={out:?}"
+    );
+}
+
 #[test]
 fn all_cleancode_rules_load_without_verbose_skips() {
     let dir = TempDir::new().unwrap();
@@ -45,22 +62,41 @@ fn all_cleancode_rules_load_without_verbose_skips() {
 }
 
 #[test]
-fn boolean_argument_flag_reports_bool_param() {
+fn boolean_argument_flag_reports_bool_param_at_param_line() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
         "flag.rs",
-        r#"
-fn process(flag: bool) {
-    let _ = flag;
-}
-"#,
+        "fn process(flag: bool) {\n    let _ = flag;\n}\n",
     );
     let (code, out, err) = run_only(&path, "BooleanArgumentFlag");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("BooleanArgumentFlag"), "stdout={out:?}");
-    assert!(out.contains("process"), "stdout={out:?}");
-    assert!(out.contains("flag"), "stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "BooleanArgumentFlag",
+        "The method process has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.",
+    );
+}
+
+#[test]
+fn boolean_argument_flag_reports_method_with_enclosing_type_image() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "method.rs",
+        "struct Worker;\nimpl Worker {\n    fn run(flag: bool) {\n        let _ = flag;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "BooleanArgumentFlag");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "BooleanArgumentFlag",
+        "The method Worker::run has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.",
+    );
 }
 
 #[test]
@@ -69,36 +105,19 @@ fn boolean_argument_flag_skips_underscore_and_non_bool() {
     let path = write_file(
         dir.path(),
         "ok.rs",
-        r#"
-fn process(_flag: bool, count: i32) {
-    let _ = count;
-}
-"#,
+        "fn process(_flag: bool, count: i32) {\n    let _ = count;\n}\n",
     );
     let (code, out, err) = run_only(&path, "BooleanArgumentFlag");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
 
 #[test]
-fn boolean_argument_flag_honours_exceptions_and_ignorepattern() {
+fn boolean_argument_flag_honours_exceptions_on_enclosing_type() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
         "ex.rs",
-        r#"
-struct Allowed;
-impl Allowed {
-    fn run(flag: bool) {
-        let _ = flag;
-    }
-}
-struct Other;
-impl Other {
-    fn create_with(flag: bool) {
-        let _ = flag;
-    }
-}
-"#,
+        "struct Allowed;\nimpl Allowed {\n    fn run(flag: bool) {\n        let _ = flag;\n    }\n}\nstruct Other;\nimpl Other {\n    fn run(flag: bool) {\n        let _ = flag;\n    }\n}\n",
     );
     let xml = dir.path().join("baf.xml");
     fs::write(
@@ -108,7 +127,6 @@ impl Other {
   <rule ref="cleancode/BooleanArgumentFlag">
     <properties>
       <property name="exceptions" value="Allowed"/>
-      <property name="ignorepattern" value="(^create)i"/>
     </properties>
   </rule>
 </ruleset>
@@ -116,214 +134,34 @@ impl Other {
     )
     .unwrap();
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
-    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
-}
-
-#[test]
-fn else_expression_reports_terminal_else() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "else.rs",
-        r#"
-fn choose(flag: bool) -> i32 {
-    if flag {
-        1
-    } else {
-        2
-    }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "ElseExpression");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("ElseExpression"), "stdout={out:?}");
-    assert!(out.contains("choose"), "stdout={out:?}");
+    assert!(
+        !out.contains("Allowed::run"),
+        "exceptions must skip Allowed: stdout={out:?}"
+    );
+    assert_finding(
+        &out,
+        &path,
+        9,
+        "BooleanArgumentFlag",
+        "The method Other::run has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.",
+    );
 }
 
 #[test]
-fn else_expression_reports_terminal_else_but_not_else_if_only_chains() {
+fn boolean_argument_flag_honours_ignorepattern_on_method_name() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
-        "elseif_only.rs",
-        r#"
-fn chain(n: i32) -> i32 {
-    if n > 0 {
-        1
-    } else if n < 0 {
-        -1
-    } else {
-        0
-    }
-}
-fn no_terminal(n: i32) -> i32 {
-    if n > 0 {
-        1
-    } else if n < 0 {
-        -1
-    } else if true {
-        0
-    } else if false {
-        2
-    }
-}
-"#,
+        "ign.rs",
+        "fn create_with(flag: bool) {\n    let _ = flag;\n}\nfn process(flag: bool) {\n    let _ = flag;\n}\n",
     );
-    let (code, out, err) = run_only(&path, "ElseExpression");
-    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("chain"), "stdout={out:?}");
-    assert!(!out.contains("no_terminal"), "stdout={out:?}");
-}
-
-#[test]
-fn if_statement_assignment_reports_assign_in_condition() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "assign.rs",
-        r#"
-fn scan(mut x: i32) {
-    if { x = 1; true } {
-        let _ = x;
-    }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "IfStatementAssignment");
-    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("IfStatementAssignment"), "stdout={out:?}");
-    assert!(out.contains("line"), "stdout={out:?}");
-}
-
-#[test]
-fn if_statement_assignment_allows_if_let() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "iflet.rs",
-        r#"
-fn scan(v: Option<i32>) {
-    if let Some(x) = v {
-        let _ = x;
-    }
-    while let Some(x) = Some(1) {
-        let _ = x;
-        break;
-    }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "IfStatementAssignment");
-    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
-}
-
-#[test]
-fn duplicated_array_key_reports_duplicate_struct_fields() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "dup.rs",
-        r#"
-struct Point { x: i32, y: i32 }
-fn make() -> Point {
-    Point { x: 1, y: 2, x: 3 }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "DuplicatedArrayKey");
-    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("DuplicatedArrayKey"), "stdout={out:?}");
-    assert!(out.contains("x"), "stdout={out:?}");
-}
-
-#[test]
-fn duplicated_array_key_allows_unique_fields() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "ok.rs",
-        r#"
-struct Point { x: i32, y: i32 }
-fn make() -> Point {
-    Point { x: 1, y: 2 }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "DuplicatedArrayKey");
-    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
-}
-
-#[test]
-fn static_access_reports_other_type_path_call() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "static.rs",
-        r#"
-struct Helper;
-impl Helper {
-    fn make() -> i32 { 1 }
-}
-struct Worker;
-impl Worker {
-    fn run() -> i32 {
-        Helper::make()
-    }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "StaticAccess");
-    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("StaticAccess"), "stdout={out:?}");
-    assert!(out.contains("Helper"), "stdout={out:?}");
-    assert!(out.contains("run"), "stdout={out:?}");
-}
-
-#[test]
-fn if_statement_assignment_reports_assign_in_while_condition() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "while.rs",
-        r#"
-fn scan(mut x: i32) {
-    while { x = 1; false } {
-        let _ = x;
-    }
-}
-"#,
-    );
-    let (code, out, err) = run_only(&path, "IfStatementAssignment");
-    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    assert!(out.contains("IfStatementAssignment"), "stdout={out:?}");
-}
-
-#[test]
-fn static_access_honours_ignorepattern() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(
-        dir.path(),
-        "ignore.rs",
-        r#"
-struct Helper;
-impl Helper {
-    fn make() -> i32 { 1 }
-}
-struct Worker;
-impl Worker {
-    fn create_worker() -> i32 {
-        Helper::make()
-    }
-}
-"#,
-    );
-    let xml = dir.path().join("sa.xml");
+    let xml = dir.path().join("baf.xml");
     fs::write(
         &xml,
         r#"<?xml version="1.0" encoding="UTF-8" ?>
-<ruleset name="sa">
-  <rule ref="cleancode/StaticAccess">
+<ruleset name="baf">
+  <rule ref="cleancode/BooleanArgumentFlag">
     <properties>
       <property name="ignorepattern" value="(^create)i"/>
     </properties>
@@ -333,31 +171,248 @@ impl Worker {
     )
     .unwrap();
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        !out.contains("create_with"),
+        "ignorepattern must skip create_with: stdout={out:?}"
+    );
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "BooleanArgumentFlag",
+        "The method process has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.",
+    );
+}
+
+#[test]
+fn else_expression_reports_terminal_else_at_else_line() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "else.rs",
+        "fn choose(flag: bool) -> i32 {\n    if flag {\n        1\n    } else {\n        2\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "ElseExpression");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "ElseExpression",
+        "The method choose uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them.",
+    );
+}
+
+#[test]
+fn else_expression_reports_terminal_else_but_not_else_if_only_chains() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "elseif_only.rs",
+        "fn chain(n: i32) -> i32 {\n    if n > 0 {\n        1\n    } else if n < 0 {\n        -1\n    } else {\n        0\n    }\n}\nfn no_terminal(n: i32) -> i32 {\n    if n > 0 {\n        1\n    } else if n < 0 {\n        -1\n    } else if true {\n        0\n    } else if false {\n        2\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "ElseExpression");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        6,
+        "ElseExpression",
+        "The method chain uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them.",
+    );
+    assert!(
+        !out.contains("no_terminal"),
+        "else-if-only chain must stay quiet: stdout={out:?}"
+    );
+}
+
+#[test]
+fn else_expression_skips_nested_fn_bodies() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested.rs",
+        "fn outer(flag: bool) -> i32 {\n    fn inner(flag: bool) -> i32 {\n        if flag {\n            1\n        } else {\n            2\n        }\n    }\n    inner(flag)\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "ElseExpression");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
 
 #[test]
-fn static_access_allows_self_path_and_exceptions() {
+fn if_statement_assignment_reports_line_and_column_in_if_condition() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "assign.rs",
+        "fn scan(mut x: i32) {\n    if { x = 1; true } {\n        let _ = x;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "IfStatementAssignment");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "IfStatementAssignment",
+        "Avoid assigning values to variables in if clauses and the like (line '2', column '10').",
+    );
+}
+
+#[test]
+fn if_statement_assignment_reports_line_and_column_in_while_condition() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while.rs",
+        "fn scan(mut x: i32) {\n    while { x = 1; false } {\n        let _ = x;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "IfStatementAssignment");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "IfStatementAssignment",
+        "Avoid assigning values to variables in if clauses and the like (line '2', column '13').",
+    );
+}
+
+#[test]
+fn if_statement_assignment_allows_if_let_and_while_let() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "iflet.rs",
+        "fn scan(v: Option<i32>) {\n    if let Some(x) = v {\n        let _ = x;\n    }\n    while let Some(x) = Some(1) {\n        let _ = x;\n        break;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "IfStatementAssignment");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn if_statement_assignment_skips_nested_fn_bodies() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested.rs",
+        "fn outer(mut x: i32) {\n    fn inner(mut x: i32) {\n        if { x = 1; true } {\n            let _ = x;\n        }\n    }\n    inner(x);\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "IfStatementAssignment");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn duplicated_array_key_reports_duplicate_field_with_first_line() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "dup.rs",
+        "struct Point { x: i32, y: i32 }\nfn make() -> Point {\n    Point { x: 1, y: 2, x: 3 }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "DuplicatedArrayKey");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "DuplicatedArrayKey",
+        "Duplicated array key x, first declared at line 3.",
+    );
+}
+
+#[test]
+fn duplicated_array_key_reports_duplicate_across_different_lines() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "dup_lines.rs",
+        "struct Point { x: i32, y: i32 }\nfn make() -> Point {\n    Point {\n        x: 1,\n        y: 2,\n        x: 3,\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "DuplicatedArrayKey");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        6,
+        "DuplicatedArrayKey",
+        "Duplicated array key x, first declared at line 4.",
+    );
+}
+
+#[test]
+fn duplicated_array_key_allows_unique_fields() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
         "ok.rs",
-        r#"
-struct Worker;
-impl Worker {
-    fn make() -> i32 { 1 }
-    fn run() -> i32 {
-        Self::make()
-    }
+        "struct Point { x: i32, y: i32 }\nfn make() -> Point {\n    Point { x: 1, y: 2 }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "DuplicatedArrayKey");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
-struct Math;
-impl Math {
-    fn abs(n: i32) -> i32 { n }
+
+#[test]
+fn static_access_reports_other_type_path_call_at_call_line() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "static.rs",
+        "struct Helper;\nimpl Helper {\n    fn make() -> i32 { 1 }\n}\nstruct Worker;\nimpl Worker {\n    fn run() -> i32 {\n        Helper::make()\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        8,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'run'.",
+    );
 }
-fn use_math() -> i32 {
-    Math::abs(1)
+
+#[test]
+fn static_access_allows_self_path_and_same_enclosing_type() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "self.rs",
+        "struct Worker;\nimpl Worker {\n    fn make() -> i32 { 1 }\n    fn run() -> i32 {\n        Self::make()\n    }\n    fn again() -> i32 {\n        Worker::make()\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
-"#,
+
+#[test]
+fn static_access_skips_snake_case_module_paths() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "modpath.rs",
+        "mod helper {\n    pub fn make() -> i32 { 1 }\n}\nfn run() -> i32 {\n    helper::make()\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn static_access_skips_bare_path_without_call() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "bare.rs",
+        "struct Helper;\nimpl Helper {\n    const VALUE: i32 = 1;\n}\nfn run() -> i32 {\n    let _ = Helper::VALUE;\n    0\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn static_access_honours_exceptions() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "ex.rs",
+        "struct Math;\nimpl Math {\n    fn abs(n: i32) -> i32 { n }\n}\nstruct Helper;\nimpl Helper {\n    fn make() -> i32 { 1 }\n}\nfn use_both() -> i32 {\n    Math::abs(Helper::make())\n}\n",
     );
     let xml = dir.path().join("sa.xml");
     fs::write(
@@ -374,5 +429,84 @@ fn use_math() -> i32 {
     )
     .unwrap();
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        !out.contains("'Math'"),
+        "exceptions must skip Math: stdout={out:?}"
+    );
+    assert_finding(
+        &out,
+        &path,
+        10,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'use_both'.",
+    );
+}
+
+#[test]
+fn static_access_honours_ignorepattern() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "ignore.rs",
+        "struct Helper;\nimpl Helper {\n    fn make() -> i32 { 1 }\n}\nstruct Worker;\nimpl Worker {\n    fn create_worker() -> i32 {\n        Helper::make()\n    }\n    fn run() -> i32 {\n        Helper::make()\n    }\n}\n",
+    );
+    let xml = dir.path().join("sa.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="sa">
+  <rule ref="cleancode/StaticAccess">
+    <properties>
+      <property name="ignorepattern" value="(^create)i"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        !out.contains("create_worker"),
+        "ignorepattern must skip create_worker: stdout={out:?}"
+    );
+    assert_finding(
+        &out,
+        &path,
+        11,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'run'.",
+    );
+}
+
+#[test]
+fn static_access_skips_nested_fn_bodies() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested.rs",
+        "struct Helper;\nimpl Helper {\n    fn make() -> i32 { 1 }\n}\nfn outer() -> i32 {\n    fn inner() -> i32 {\n        Helper::make()\n    }\n    inner()\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn static_access_prefers_rightmost_pascal_receiver() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "path.rs",
+        "mod outer {\n    pub struct Helper;\n    impl Helper {\n        pub fn make() -> i32 { 1 }\n    }\n}\nfn run() -> i32 {\n    outer::Helper::make()\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        8,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'run'.",
+    );
 }
