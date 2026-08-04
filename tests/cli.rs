@@ -76,6 +76,131 @@ fn unknown_option_exits_one() {
     let (code, _out, err) = run_cli(&["src", "text", "codesize", "--not-a-real-flag"]);
     assert_eq!(code, EXIT_ERROR);
     assert!(err.contains("error:"), "stderr={err:?}");
+    assert!(
+        err.contains("unknown option: --not-a-real-flag"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn bare_help_word_prints_usage_and_exits_zero() {
+    let (code, out, err) = run_cli(&["help"]);
+    assert_eq!(code, EXIT_SUCCESS);
+    assert!(out.contains("Usage:"), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn unknown_single_dash_option_names_it_and_exits_one() {
+    let (code, _out, err) = run_cli(&["src", "text", "codesize", "-x"]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(err.contains("unknown option: -x"), "stderr={err:?}");
+}
+
+#[test]
+fn lone_dash_is_treated_as_a_positional_not_an_option() {
+    // A single "-" does not start the unknown-option branch; it becomes a
+    // fourth positional, so the ruleset parses fine and "-" is an unmatched
+    // path that yields a discovery error, not an "unknown option" error.
+    let (code, _out, err) = run_cli(&["-", "text", "codesize"]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(!err.contains("unknown option"), "stderr={err:?}");
+}
+
+#[test]
+fn missing_value_for_option_names_the_flag_and_exits_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let (code, _out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize", "--reportfile"]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(
+        err.contains("missing value for --reportfile"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn minimumpriority_rejects_non_integer_value() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let (code, _out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--minimumpriority",
+        "nope",
+    ]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(
+        err.contains("--minimumpriority requires an integer"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn minimumpriority_rejects_out_of_range_value() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    for value in ["0", "6"] {
+        let (code, _out, err) = run_cli(&[
+            path.to_str().unwrap(),
+            "text",
+            "codesize",
+            "--minimumpriority",
+            value,
+        ]);
+        assert_eq!(code, EXIT_ERROR, "value={value}");
+        assert!(
+            err.contains("--minimumpriority must be between 1 and 5"),
+            "value={value} stderr={err:?}"
+        );
+    }
+}
+
+#[test]
+fn maximumpriority_rejects_non_integer_and_out_of_range_value() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let (code, _out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--maximumpriority",
+        "bogus",
+    ]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(
+        err.contains("--maximumpriority requires an integer"),
+        "stderr={err:?}"
+    );
+
+    let (code, _out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--maximumpriority",
+        "9",
+    ]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(
+        err.contains("--maximumpriority must be between 1 and 5"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn suffixes_without_leading_dot_are_normalized() {
+    let dir = TempDir::new().unwrap();
+    write_file(dir.path(), "b.txt", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        dir.path().to_str().unwrap(),
+        "text",
+        "codesize",
+        "--suffixes",
+        "txt",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("b.txt"), "stdout={out:?}");
 }
 
 #[test]
