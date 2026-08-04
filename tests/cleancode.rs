@@ -263,6 +263,25 @@ fn else_expression_skips_nested_fn_bodies() {
 }
 
 #[test]
+fn else_expression_skips_trait_method_without_body_then_reports_later() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_else.rs",
+        "trait Skip {\n    fn abstract_method(&self);\n}\nfn choose(flag: bool) -> i32 {\n    if flag {\n        1\n    } else {\n        2\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "ElseExpression");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        7,
+        "ElseExpression",
+        "The method choose uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them.",
+    );
+}
+
+#[test]
 fn if_statement_assignment_reports_line_and_column_in_if_condition() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
@@ -322,6 +341,25 @@ fn if_statement_assignment_skips_nested_fn_bodies() {
     );
     let (code, out, err) = run_only(&path, "IfStatementAssignment");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn if_statement_assignment_skips_trait_method_without_body_then_reports_later() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_assign.rs",
+        "trait Skip {\n    fn abstract_method(&self);\n}\nfn scan(mut x: i32) {\n    if { x = 1; true } {\n        let _ = x;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "IfStatementAssignment");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        5,
+        "IfStatementAssignment",
+        "Avoid assigning values to variables in if clauses and the like (line '5', column '10').",
+    );
 }
 
 #[test]
@@ -513,6 +551,25 @@ fn static_access_skips_nested_fn_bodies() {
     );
     let (code, out, err) = run_only(&path, "StaticAccess");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn static_access_skips_trait_method_without_body_then_reports_later() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_static.rs",
+        "trait Skip {\n    fn abstract_method(&self);\n}\nstruct Helper;\nimpl Helper {\n    fn make() -> i32 { 1 }\n}\nfn run() -> i32 {\n    Helper::make()\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        9,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'run'.",
+    );
 }
 
 #[test]
