@@ -11,7 +11,6 @@
 //! - `match` arms map to phpmd/pdepend switch case labels; a lone `_` arm is
 //!   the default and does not increment CCN (same as Go `default`).
 //! - `for` maps to phpmd foreach / Go range for NPath (`E(iter) + 1 + NP(body)`).
-use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{BinOp, Block, Expr, ExprIf, Pat, Stmt};
 
@@ -68,12 +67,10 @@ impl<'ast> Visit<'ast> for CcnVisitor {
     }
 }
 
+// `_` always parses to `Pat::Wild`; syn rejects `_` as an `Ident` token, so
+// there is no `Pat::Ident` case to match here.
 fn is_default_match_pat(pat: &Pat) -> bool {
-    match pat {
-        Pat::Wild(_) => true,
-        Pat::Ident(id) if id.ident == "_" => true,
-        _ => false,
-    }
+    matches!(pat, Pat::Wild(_))
 }
 
 /// NPath complexity (Nejmeh / pdepend), adapted to Rust control flow.
@@ -149,12 +146,14 @@ fn npath_return_expression(expr: &Expr) -> Option<usize> {
 fn npath_if(node: &ExprIf) -> usize {
     let expr = expression_complexity(&node.cond);
     let body = npath_block(&node.then_branch);
+    // Rust grammar allows only a block or a nested `if` after `else`; no
+    // other expression form parses, so there is no third case here.
     let else_part = match &node.else_branch {
         None => 1,
         Some((_, else_expr)) => match else_expr.as_ref() {
             Expr::If(nested) => npath_if(nested),
             Expr::Block(b) => npath_block(&b.block),
-            other => npath_expr_stmt(other),
+            _ => unreachable!("else branch is always a block or an `if`"),
         },
     };
     else_part + body + expr
@@ -193,14 +192,6 @@ impl<'ast> Visit<'ast> for BoolOpVisitor {
         }
         syn::visit::visit_expr_binary(self, node);
     }
-}
-
-/// Inclusive source lines spanned by a syn node (PHPMD `loc`).
-#[allow(dead_code)]
-pub fn lines_of_code<T: Spanned>(node: &T) -> usize {
-    let start = node.span().start().line;
-    let end = node.span().end().line;
-    end.saturating_sub(start).saturating_add(1)
 }
 
 /// Effective lines of code: skip blank and comment-only lines (PHPMD `eloc`).
