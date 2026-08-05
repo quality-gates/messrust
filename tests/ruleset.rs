@@ -325,6 +325,110 @@ fn ref_to_a_ruleset_with_an_exclude_missing_name_attribute_is_ignored() {
 }
 
 #[test]
+fn unknown_ruleset_name_reports_a_clear_error() {
+    // read_ruleset: an identifier that matches neither a builtin name nor a
+    // file on disk must fail with a clear message naming the bad spec.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "not-a-real-ruleset"]);
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("unknown ruleset or file: not-a-real-ruleset"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn only_filter_naming_an_unloaded_rule_reports_a_clear_error() {
+    // apply_name_filters: --only naming a rule absent from the loaded
+    // rulesets must fail with a clear message naming the bad rule.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--only",
+        "NotALoadedRule",
+    ]);
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("rule 'NotALoadedRule' is not present in the loaded rulesets"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn only_filter_keeps_the_named_rule_and_drops_the_rest() {
+    // apply_name_filters: --only retains just the named rule even though
+    // the codesize ruleset loads more than one rule.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--only",
+        "ExcessiveParameterList",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn disable_filter_drops_the_named_rule() {
+    // apply_name_filters: --disable removes the named rule, so a fixture
+    // that would otherwise violate it produces no finding.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--disable",
+        "ExcessiveParameterList",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn empty_ruleset_spec_reports_no_rulesets_specified() {
+    // load_and_filter: an empty ruleset positional splits to zero specs,
+    // which must fail clearly rather than silently loading nothing.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", ""]);
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("no rulesets specified"), "stderr={err:?}");
+}
+
+#[test]
+fn bare_ruleset_ref_pulls_in_every_rule_from_the_referenced_ruleset() {
+    // add_ruleset_rules: a <rule ref="codesize"/> with no rule name in the
+    // ref path pulls in every non-empty-class rule from the whole
+    // referenced ruleset, not just one named rule.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let xml = dir.path().join("bare_ruleset_ref.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="BareRulesetRef">
+  <rule ref="codesize"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
 fn duplicate_rule_names_across_specs_are_deduplicated() {
     // load_and_filter: seen.insert(...) dedups a rule name loaded twice
     // (e.g. two comma-separated rulesets that reference the same rule).
