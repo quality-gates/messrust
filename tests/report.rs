@@ -33,6 +33,14 @@ fn write_file(dir: &Path, rel: &str, contents: &str) -> PathBuf {
     path
 }
 
+/// Return a new temp directory whose path resolves symlinks (macOS `/var` →
+/// `/private/var`) so assertions match the paths `messrust` prints.
+fn tmp() -> (TempDir, PathBuf) {
+    let td = TempDir::new().unwrap();
+    let canon = td.path().canonicalize().unwrap_or_else(|_| td.path().to_path_buf());
+    (td, canon)
+}
+
 fn fn_with_n_params(name: &str, n: usize) -> String {
     let params: Vec<String> = (0..n).map(|i| format!("param_{i}: i32")).collect();
     format!("fn {name}({}) {{}}\n", params.join(", "))
@@ -154,8 +162,8 @@ fn gitlab_fingerprint(file: &str, line: usize, rule: &str) -> String {
 
 #[test]
 fn text_format_prints_exact_aligned_violation_line() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "text", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -169,8 +177,8 @@ fn text_format_prints_exact_aligned_violation_line() {
 
 #[test]
 fn text_format_empty_findings_prints_nothing_and_exits_zero() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
@@ -179,15 +187,15 @@ fn text_format_empty_findings_prints_nothing_and_exits_zero() {
 
 #[test]
 fn text_format_pads_columns_across_unequal_path_lengths() {
-    let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "a.rs", &fn_with_n_params("a", 11));
-    write_file(dir.path(), "longer_name.rs", &fn_with_n_params("longer", 12));
-    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "text", "codesize"]);
+    let (_td, root) = tmp();
+    write_file(&root, "a.rs", &fn_with_n_params("a", 11));
+    write_file(&root, "longer_name.rs", &fn_with_n_params("longer", 12));
+    let (code, out, err) = run_cli(&[&root.to_str().unwrap(), "text", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
 
-    let short = dir.path().join("a.rs");
-    let long = dir.path().join("longer_name.rs");
+    let short = &root.join("a.rs");
+    let long = &root.join("longer_name.rs");
     let short_loc = format!("{}:1", short.display());
     let long_loc = format!("{}:1", long.display());
     let loc_width = short_loc.len().max(long_loc.len());
@@ -206,15 +214,15 @@ fn text_format_pads_columns_across_unequal_path_lengths() {
 
 #[test]
 fn text_format_marks_suppressed_rules_and_prints_errors_with_tabs() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let suppressed = format!(
         "// messrust-disable-next-line ExcessiveParameterList\n{}",
         fn_with_n_params("entry_point", 11)
     );
-    write_file(dir.path(), "sup.rs", &suppressed);
-    write_file(dir.path(), "bad.rs", "fn broken( {\n");
+    write_file(&root, "sup.rs", &suppressed);
+    write_file(&root, "bad.rs", "fn broken( {\n");
     let (code, out, err) = run_cli(&[
-        dir.path().to_str().unwrap(),
+        &root.to_str().unwrap(),
         "text",
         "codesize",
         "--strict",
@@ -225,7 +233,7 @@ fn text_format_marks_suppressed_rules_and_prints_errors_with_tabs() {
         out.contains("ExcessiveParameterList [suppressed]"),
         "stdout={out:?}"
     );
-    let bad = dir.path().join("bad.rs");
+    let bad = &root.join("bad.rs");
     assert!(
         out.contains(&format!(
             "{}\t-\tcannot parse string into token stream",
@@ -237,8 +245,8 @@ fn text_format_marks_suppressed_rules_and_prints_errors_with_tabs() {
 
 #[test]
 fn ansi_format_uses_exact_color_codes_around_rule_and_message() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "ansi", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -252,8 +260,8 @@ fn ansi_format_uses_exact_color_codes_around_rule_and_message() {
 
 #[test]
 fn color_flag_on_text_matches_ansi_document() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code_ansi, out_ansi, err_ansi) = run_cli(&[file, "ansi", "codesize"]);
     let (code_color, out_color, err_color) = run_cli(&[file, "text", "codesize", "--color"]);
@@ -268,8 +276,8 @@ fn color_flag_on_text_matches_ansi_document() {
 
 #[test]
 fn github_format_prints_exact_warning_annotation() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "github", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -283,8 +291,8 @@ fn github_format_prints_exact_warning_annotation() {
 
 #[test]
 fn github_format_empty_findings_prints_nothing() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "github", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert_eq!(out, "");
@@ -293,15 +301,15 @@ fn github_format_empty_findings_prints_nothing() {
 
 #[test]
 fn github_format_marks_suppressed_and_emits_error_annotations() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let suppressed = format!(
         "// messrust-disable-next-line ExcessiveParameterList\n{}",
         fn_with_n_params("entry_point", 11)
     );
-    let path = write_file(dir.path(), "sup.rs", &suppressed);
-    let bad = write_file(dir.path(), "bad.rs", "fn broken( {\n");
+    let path = write_file(&root, "sup.rs", &suppressed);
+    let bad = write_file(&root, "bad.rs", "fn broken( {\n");
     let (code, out, err) = run_cli(&[
-        dir.path().to_str().unwrap(),
+        &root.to_str().unwrap(),
         "github",
         "codesize",
         "--strict",
@@ -325,8 +333,8 @@ fn github_format_marks_suppressed_and_emits_error_annotations() {
 
 #[test]
 fn json_format_prints_exact_document_for_one_violation() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -363,8 +371,8 @@ fn json_format_prints_exact_document_for_one_violation() {
 
 #[test]
 fn json_format_empty_findings_is_skeleton_with_empty_files() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
@@ -379,11 +387,11 @@ fn json_format_empty_findings_is_skeleton_with_empty_files() {
 
 #[test]
 fn json_format_includes_errors_and_groups_files_in_first_seen_order() {
-    let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "z.rs", &fn_with_n_params("late", 11));
-    write_file(dir.path(), "a.rs", &fn_with_n_params("early", 12));
-    write_file(dir.path(), "bad.rs", "fn broken( {\n");
-    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "json", "codesize"]);
+    let (_td, root) = tmp();
+    write_file(&root, "z.rs", &fn_with_n_params("late", 11));
+    write_file(&root, "a.rs", &fn_with_n_params("early", 12));
+    write_file(&root, "bad.rs", "fn broken( {\n");
+    let (code, out, err) = run_cli(&[&root.to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_ERROR, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -402,9 +410,9 @@ fn json_format_includes_errors_and_groups_files_in_first_seen_order() {
 
 #[test]
 fn json_format_groups_two_violations_in_the_same_file() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let path = write_file(
-        dir.path(),
+        &root,
         "fixture.rs",
         &(fn_with_n_params("first", 11) + &fn_with_n_params("second", 12)),
     );
@@ -422,8 +430,8 @@ fn json_format_groups_two_violations_in_the_same_file() {
 
 #[test]
 fn color_flag_does_not_rewrite_non_text_formats() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
 
     let (code, out, err) = run_cli(&[file, "github", "codesize", "--color"]);
@@ -448,12 +456,12 @@ fn color_flag_does_not_rewrite_non_text_formats() {
 
 #[test]
 fn json_format_marks_suppressed_true_under_strict() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let source = format!(
         "// messrust-disable-next-line ExcessiveParameterList\n{}",
         fn_with_n_params("entry_point", 11)
     );
-    let path = write_file(dir.path(), "fixture.rs", &source);
+    let path = write_file(&root, "fixture.rs", &source);
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize", "--strict"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -462,9 +470,9 @@ fn json_format_marks_suppressed_true_under_strict() {
 
 #[test]
 fn json_format_carries_class_and_method_for_impl_methods() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let path = write_file(
-        dir.path(),
+        &root,
         "fixture.rs",
         "struct S;\nimpl S {\n  fn m(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}\n}\n",
     );
@@ -481,8 +489,8 @@ fn json_format_carries_class_and_method_for_impl_methods() {
 
 #[test]
 fn sarif_format_prints_exact_document_for_one_violation() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "sarif", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -526,8 +534,8 @@ fn sarif_format_prints_exact_document_for_one_violation() {
 
 #[test]
 fn sarif_format_empty_findings_has_empty_rules_and_results() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "sarif", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
@@ -540,12 +548,12 @@ fn sarif_format_empty_findings_has_empty_rules_and_results() {
 
 #[test]
 fn sarif_format_adds_suppressions_block_when_strict() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let source = format!(
         "// messrust-disable-next-line ExcessiveParameterList\n{}",
         fn_with_n_params("entry_point", 11)
     );
-    let path = write_file(dir.path(), "fixture.rs", &source);
+    let path = write_file(&root, "fixture.rs", &source);
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "sarif", "codesize", "--strict"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
@@ -557,10 +565,10 @@ fn sarif_format_adds_suppressions_block_when_strict() {
 
 #[test]
 fn sarif_level_is_error_for_priority_one_and_two() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     for priority in [1_u8, 2] {
-        let rules = priority_ruleset(dir.path(), priority);
+        let rules = priority_ruleset(&root, priority);
         let (code, out, err) = run_cli(&[
             path.to_str().unwrap(),
             "sarif",
@@ -582,13 +590,13 @@ fn sarif_level_is_error_for_priority_one_and_two() {
 
 #[test]
 fn sarif_dedupes_rule_metadata_across_two_findings_of_same_rule() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     write_file(
-        dir.path(),
+        &root,
         "fixture.rs",
         &(fn_with_n_params("first", 11) + &fn_with_n_params("second", 12)),
     );
-    let (code, out, err) = run_cli(&[dir.path().join("fixture.rs").to_str().unwrap(), "sarif", "codesize"]);
+    let (code, out, err) = run_cli(&[&root.join("fixture.rs").to_str().unwrap(), "sarif", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap().len(), 1);
@@ -599,9 +607,9 @@ fn sarif_dedupes_rule_metadata_across_two_findings_of_same_rule() {
 
 #[test]
 fn reportfile_writes_exact_text_document_and_leaves_stdout_empty() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
-    let report = dir.path().join("out.txt");
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let report = &root.join("out.txt");
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[
         file,
@@ -623,12 +631,12 @@ fn reportfile_writes_exact_text_document_and_leaves_stdout_empty() {
 
 #[test]
 fn reportfile_writes_exact_json_sarif_and_github_documents() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
 
     for format in ["json", "sarif", "github"] {
-        let report = dir.path().join(format!("out.{format}"));
+        let report = &root.join(format!("out.{format}"));
         let (code, out, err) = run_cli(&[
             file,
             format,
@@ -657,9 +665,9 @@ fn reportfile_writes_exact_json_sarif_and_github_documents() {
 
 #[test]
 fn reportfile_missing_parent_directory_exits_one_on_stderr() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
-    let missing = dir.path().join("no/such/dir/out.txt");
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let missing = &root.join("no/such/dir/out.txt");
     let (code, out, err) = run_cli(&[
         path.to_str().unwrap(),
         "text",
@@ -679,15 +687,15 @@ fn reportfile_missing_parent_directory_exits_one_on_stderr() {
 
 #[test]
 fn xml_format_prints_pmd_document_with_escaped_paths() {
-    let dir = TempDir::new().unwrap();
+    let (_td, root) = tmp();
     let path = write_file(
-        dir.path(),
+        &root,
         "a&b<>\".rs",
         &fn_with_n_params("f", 11),
     );
     // Also cover apostrophe escape.
-    let path2 = write_file(dir.path(), "o'brien.rs", &fn_with_n_params("g", 11));
-    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "xml", "codesize"]);
+    let path2 = write_file(&root, "o'brien.rs", &fn_with_n_params("g", 11));
+    let (code, out, err) = run_cli(&[&root.to_str().unwrap(), "xml", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
     assert!(out.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n"));
@@ -719,14 +727,14 @@ fn xml_format_prints_pmd_document_with_escaped_paths() {
 
 #[test]
 fn xml_format_closes_each_file_element_in_a_multi_file_report() {
-    let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "a.rs", &fn_with_n_params("a", 11));
-    write_file(dir.path(), "b.rs", &fn_with_n_params("b", 12));
-    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "xml", "codesize"]);
+    let (_td, root) = tmp();
+    write_file(&root, "a.rs", &fn_with_n_params("a", 11));
+    write_file(&root, "b.rs", &fn_with_n_params("b", 12));
+    let (code, out, err) = run_cli(&[&root.to_str().unwrap(), "xml", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
-    let a = dir.path().join("a.rs");
-    let b = dir.path().join("b.rs");
+    let a = &root.join("a.rs");
+    let b = &root.join("b.rs");
     let expected_files = format!(
         "  <file name=\"{}\">\n    <violation beginline=\"1\" endline=\"1\" rule=\"ExcessiveParameterList\" ruleset=\"Code Size Rules\" function=\"a\" priority=\"3\" suppressed=\"false\">\n      {}\n    </violation>\n  </file>\n  <file name=\"{}\">\n    <violation beginline=\"1\" endline=\"1\" rule=\"ExcessiveParameterList\" ruleset=\"Code Size Rules\" function=\"b\" priority=\"3\" suppressed=\"false\">\n      {}\n    </violation>\n  </file>\n</pmd>\n",
         a.display(),
@@ -744,8 +752,8 @@ fn xml_format_closes_each_file_element_in_a_multi_file_report() {
 
 #[test]
 fn xml_format_empty_findings_is_shell_only() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "xml", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
@@ -758,14 +766,14 @@ fn xml_format_empty_findings_is_shell_only() {
 
 #[test]
 fn xml_format_emits_error_elements_and_method_attrs() {
-    let dir = TempDir::new().unwrap();
-    write_file(dir.path(), "bad.rs", "fn broken( {\n");
+    let (_td, root) = tmp();
+    write_file(&root, "bad.rs", "fn broken( {\n");
     write_file(
-        dir.path(),
+        &root,
         "method.rs",
         "struct S;\nimpl S {\n  fn m(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}\n}\n",
     );
-    let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), "xml", "codesize"]);
+    let (code, out, err) = run_cli(&[&root.to_str().unwrap(), "xml", "codesize"]);
     assert_eq!(code, EXIT_ERROR, "stderr={err:?}");
     assert!(out.contains("class=\"S\""));
     assert!(out.contains("method=\"m\""));
@@ -775,8 +783,8 @@ fn xml_format_emits_error_elements_and_method_attrs() {
 
 #[test]
 fn html_format_prints_exact_table_document() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "html", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -798,8 +806,8 @@ fn html_format_prints_exact_table_document() {
 
 #[test]
 fn html_format_empty_findings_omits_table() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "html", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     let expected = "\
@@ -812,8 +820,8 @@ fn html_format_empty_findings_omits_table() {
 
 #[test]
 fn html_format_escapes_special_characters_in_path() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "a&b.rs", &fn_with_n_params("f", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "a&b.rs", &fn_with_n_params("f", 11));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "html", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     let escaped = path.to_str().unwrap().replace('&', "&amp;");
@@ -826,8 +834,8 @@ fn html_format_escapes_special_characters_in_path() {
 
 #[test]
 fn gitlab_format_prints_exact_issue_array_with_fingerprint() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "gitlab", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -853,8 +861,8 @@ fn gitlab_format_prints_exact_issue_array_with_fingerprint() {
 
 #[test]
 fn gitlab_format_empty_findings_is_empty_array() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "gitlab", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert_eq!(out, "[]\n");
@@ -862,8 +870,8 @@ fn gitlab_format_empty_findings_is_empty_array() {
 
 #[test]
 fn gitlab_severity_maps_each_priority() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let cases = [
         (1_u8, "blocker"),
         (2, "critical"),
@@ -872,7 +880,7 @@ fn gitlab_severity_maps_each_priority() {
         (5, "info"),
     ];
     for (priority, severity) in cases {
-        let rules = priority_ruleset(dir.path(), priority);
+        let rules = priority_ruleset(&root, priority);
         let (code, out, err) = run_cli(&[
             path.to_str().unwrap(),
             "gitlab",
@@ -886,8 +894,8 @@ fn gitlab_severity_maps_each_priority() {
 
 #[test]
 fn checkstyle_format_prints_exact_document() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let file = path.to_str().unwrap();
     let (code, out, err) = run_cli(&[file, "checkstyle", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -901,8 +909,8 @@ fn checkstyle_format_prints_exact_document() {
 
 #[test]
 fn checkstyle_format_empty_findings_is_shell_only() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "clean.rs", &fn_with_n_params("ok", 0));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "checkstyle", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert_eq!(
@@ -915,11 +923,11 @@ fn checkstyle_format_empty_findings_is_shell_only() {
 
 #[test]
 fn checkstyle_severity_and_suppressed_message_suffix() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fn_with_n_params("entry_point", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "fixture.rs", &fn_with_n_params("entry_point", 11));
     let cases = [(1_u8, "error"), (2, "error"), (3, "warning"), (4, "info"), (5, "info")];
     for (priority, severity) in cases {
-        let rules = priority_ruleset(dir.path(), priority);
+        let rules = priority_ruleset(&root, priority);
         let (code, out, err) = run_cli(&[
             path.to_str().unwrap(),
             "checkstyle",
@@ -936,7 +944,7 @@ fn checkstyle_severity_and_suppressed_message_suffix() {
         "// messrust-disable-next-line ExcessiveParameterList\n{}",
         fn_with_n_params("entry_point", 11)
     );
-    let path = write_file(dir.path(), "sup.rs", &source);
+    let path = write_file(&root, "sup.rs", &source);
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "checkstyle", "codesize", "--strict"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(
@@ -950,8 +958,8 @@ fn checkstyle_severity_and_suppressed_message_suffix() {
 
 #[test]
 fn checkstyle_and_xml_escape_ampersand_in_file_name() {
-    let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "x&y.rs", &fn_with_n_params("f", 11));
+    let (_td, root) = tmp();
+    let path = write_file(&root, "x&y.rs", &fn_with_n_params("f", 11));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "checkstyle", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("&amp;"));
