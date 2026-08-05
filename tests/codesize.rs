@@ -327,3 +327,335 @@ fn codesize_fixture_fires_parameter_list_and_too_many_fields() {
     assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
     assert!(out.contains("TooManyFields"), "stdout={out:?}");
 }
+
+// ----- src/metrics.rs: cyclomatic complexity, isolated by decision point --
+
+fn cc_xml(dir: &Path, name: &str, report_level: u32) -> PathBuf {
+    write_file(
+        dir,
+        name,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="cc">
+  <rule ref="codesize/CyclomaticComplexity">
+    <properties>
+      <property name="reportLevel" value="{report_level}"/>
+    </properties>
+  </rule>
+</ruleset>
+"#
+        ),
+    )
+}
+
+fn np_xml(dir: &Path, name: &str, minimum: u32) -> PathBuf {
+    write_file(
+        dir,
+        name,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="np">
+  <rule ref="codesize/NPathComplexity">
+    <properties>
+      <property name="minimum" value="{minimum}"/>
+    </properties>
+  </rule>
+</ruleset>
+"#
+        ),
+    )
+}
+
+#[test]
+fn cyclomatic_complexity_bodyless_trait_method_is_base_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "trait_.rs", "trait Doer {\n    fn work(&self);\n}\n");
+    let xml = cc_xml(dir.path(), "cc.xml", 1);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("Cyclomatic Complexity of 1"), "stdout={out:?}");
+    assert!(out.contains("method work()"), "stdout={out:?}");
+}
+
+#[test]
+fn cyclomatic_complexity_while_loop_adds_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "while_.rs", "fn f(a: bool) {\n    while a {\n    }\n}\n");
+    let xml = cc_xml(dir.path(), "cc.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("Cyclomatic Complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn cyclomatic_complexity_for_loop_adds_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "for_.rs", "fn f() {\n    for i in 0..3 {\n        let _ = i;\n    }\n}\n");
+    let xml = cc_xml(dir.path(), "cc.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("Cyclomatic Complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn cyclomatic_complexity_bare_loop_adds_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "loop_.rs", "fn f() {\n    loop {\n        break;\n    }\n}\n");
+    let xml = cc_xml(dir.path(), "cc.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("Cyclomatic Complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn cyclomatic_complexity_wildcard_arm_not_counted_but_guard_is() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "match_.rs",
+        "fn f(x: i32) {\n    match x {\n        n if n > 0 => {}\n        _ => {}\n    }\n}\n",
+    );
+    let xml = cc_xml(dir.path(), "cc.xml", 3);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // base 1 + guarded arm (1) + its guard (1) + wildcard arm (0) = 3.
+    assert!(out.contains("Cyclomatic Complexity of 3"), "stdout={out:?}");
+}
+
+#[test]
+fn cyclomatic_complexity_and_or_each_add_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "bools.rs",
+        "fn f(a: bool, b: bool) {\n    if a && b || a {\n    }\n}\n",
+    );
+    let xml = cc_xml(dir.path(), "cc.xml", 4);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // base 1 + if (1) + && (1) + || (1) = 4.
+    assert!(out.contains("Cyclomatic Complexity of 4"), "stdout={out:?}");
+}
+
+// ----- src/metrics.rs: NPath complexity, isolated by statement form -------
+
+#[test]
+fn npath_complexity_bodyless_trait_method_is_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "trait_.rs", "trait Doer {\n    fn work(&self);\n}\n");
+    let xml = np_xml(dir.path(), "np.xml", 1);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 1"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_while_loop_is_condition_plus_one_plus_body() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "while_.rs", "fn f(a: bool) {\n    while a {\n    }\n}\n");
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_for_loop_is_iter_plus_one_plus_body() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "for_.rs", "fn f() {\n    for i in 0..3 {\n        let _ = i;\n    }\n}\n");
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_bare_loop_is_one_plus_body() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "loop_.rs", "fn f() {\n    loop {\n        break;\n    }\n}\n");
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_empty_match_floors_to_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "empty_match.rs",
+        "fn f(x: i32, a: bool) {\n    if a {\n    }\n    match x {}\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // if-stmt npath (2) times the empty match's floor of 1 = 2, not 0.
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_return_with_bool_expr_counts_and_or() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "ret_bool.rs",
+        "fn f(a: bool, b: bool) -> bool {\n    return a && b || a;\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_bare_return_floors_to_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "ret_bare.rs",
+        "fn f(a: bool) {\n    if a {\n    }\n    return;\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // if-stmt npath (2) times the bare return's floor of 1 = 2, not 0.
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_bare_block_statement_descends_into_it() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "block_.rs",
+        "fn f(a: bool) {\n    {\n        if a {\n        }\n    }\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_async_block_statement_descends_into_it() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "async_.rs",
+        "fn f(a: bool) {\n    async {\n        if a {\n        }\n    };\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_try_block_statement_descends_into_it() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "try_.rs",
+        "fn f(a: bool) {\n    try {\n        if a {\n        }\n    };\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_unsafe_block_statement_descends_into_it() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "unsafe_.rs",
+        "fn f(a: bool) {\n    unsafe {\n        if a {\n        }\n    }\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_macro_statement_is_opaque_factor_of_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "macro_.rs",
+        "fn f(a: bool) {\n    println!{\"x\"}\n    if a {\n    }\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // opaque macro factor (1) times the if-stmt (2) = 2.
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_nested_item_statement_is_opaque_factor_of_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "item_.rs",
+        "fn f(a: bool) {\n    fn inner() {}\n    if a {\n    }\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // opaque item factor (1) times the if-stmt (2) = 2.
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+// ----- src/metrics.rs: effective lines of code (comment/blank scanning) ---
+
+fn eml_ignore_ws_xml(dir: &Path, name: &str, minimum: u32) -> PathBuf {
+    write_file(
+        dir,
+        name,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="eml">
+  <rule ref="codesize/ExcessiveMethodLength">
+    <properties>
+      <property name="minimum" value="{minimum}"/>
+      <property name="ignore-whitespace" value="true"/>
+    </properties>
+  </rule>
+</ruleset>
+"#
+        ),
+    )
+}
+
+#[test]
+fn effective_lines_of_code_skips_a_comment_only_line() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "comment_line.rs",
+        "fn f() {\n    let a = 1;\n    // just a comment\n    let b = 2;\n}\n",
+    );
+    let xml = eml_ignore_ws_xml(dir.path(), "eml.xml", 3);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // 5 raw lines minus the comment-only line = 4 effective lines.
+    assert!(out.contains("has 4 lines of code"), "stdout={out:?}");
+}
+
+#[test]
+fn effective_lines_of_code_skips_a_multiline_block_comment() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "block_comment.rs",
+        "fn g() {\n    let a = 1; /* start\n    still inside\n    end */ let b = 2;\n}\n",
+    );
+    let xml = eml_ignore_ws_xml(dir.path(), "eml.xml", 3);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // 5 raw lines minus the fully-commented middle line = 4 effective lines.
+    assert!(out.contains("has 4 lines of code"), "stdout={out:?}");
+}
