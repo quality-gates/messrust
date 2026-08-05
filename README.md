@@ -175,19 +175,27 @@ The selected target is `.`. `mutarust --list-files .` lists every production
 source file under `src`.
 
 Measure the whole crate with the same thresholds as the future CI gate. Skip
-the packaging smoke test so each mutant does not run `cargo install`:
+the packaging smoke test so each mutant does not run `cargo install`. Use
+`--workers 1` on machines with 16 GB RAM or less — the default worker count
+matches the CPU count, and each worker runs a full `cargo test` compilation.
+Without the cap, peak memory can exceed physical RAM and freeze the system:
 
 ```text
-mutarust --config mutarust.yml --coverage --min-msi 75 --min-covered-msi 80 \
+CARGO_BUILD_JOBS=4 mutarust --config mutarust.yml --coverage --workers 1 \
+  --min-msi 75 --min-covered-msi 80 \
   --test-flags "-- --skip pack_install_smoke" .
 ```
 
 Measure one module with the same options and a file target:
 
 ```text
-mutarust --config mutarust.yml --coverage --min-msi 75 --min-covered-msi 80 \
+CARGO_BUILD_JOBS=4 mutarust --config mutarust.yml --coverage --workers 1 \
+  --min-msi 75 --min-covered-msi 80 \
   --test-flags "-- --skip pack_install_smoke" src/main.rs
 ```
+
+On machines with 32 GB RAM or more, `--workers 2` is safe and halves the wall
+time.
 
 ## Development
 
