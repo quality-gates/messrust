@@ -149,6 +149,37 @@ fn short_class_name_exception_skips_listed_name_but_reports_later() {
 }
 
 #[test]
+fn short_class_name_honours_each_entry_in_exceptions_list() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "ex2.rs", "struct Id;\nstruct Io;\nstruct Ab;\n");
+    let xml = dir.path().join("sc.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="sc">
+  <rule ref="naming/ShortClassName">
+    <properties>
+      <property name="exceptions" value="Id, Io"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(!out.contains("like Id."), "Id quiet: stdout={out:?}");
+    assert!(!out.contains("like Io."), "Io quiet: stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "ShortClassName",
+        "Avoid types with short names like Ab. Configured minimum length is 3.",
+    );
+}
+
+#[test]
 fn short_class_name_reports_short_trait_and_enum() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "te.rs", "trait Ab {}\nenum X { A }\n");
