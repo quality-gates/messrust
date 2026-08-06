@@ -163,7 +163,7 @@ Install the released mutation tool, the coverage helper, and the LLVM tools
 component:
 
 ```text
-cargo install mutarust --locked --version 0.1.1
+cargo install mutarust --locked --version 0.1.2
 cargo install cargo-llvm-cov --locked
 rustup component add llvm-tools-preview
 ```
@@ -196,6 +196,16 @@ CARGO_BUILD_JOBS=4 mutarust --config mutarust.yml --coverage --workers 1 \
 
 On machines with 32 GB RAM or more, `--workers 2` is safe and halves the wall
 time.
+
+On macOS, set `TMPDIR` to a real path under your home directory before a
+coverage run. The default temporary path under `/var/folders` resolves through
+the `/private/var` symlink. `mutarust` 0.1.2 then drops every LCOV path and
+marks all mutants as not covered:
+
+```text
+mkdir -p "$HOME/tmp/mutarust-run"
+export TMPDIR="$HOME/tmp/mutarust-run"
+```
 
 ## Development
 
