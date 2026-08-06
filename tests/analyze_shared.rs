@@ -909,3 +909,160 @@ fn upsert_type_replaces_empty_fields_from_synthetic_impl() {
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("unused_item"), "stdout={out:?}");
 }
+
+#[test]
+fn upsert_type_field_types_feed_coupling() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "upsert_cbo.rs",
+        "impl Bag { fn touch() {} }\nstruct Other;\nstruct Bag { other: Other }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "cbo.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="cbo">
+  <rule ref="design/CouplingBetweenObjects">
+    <properties>
+      <property name="maximum" value="1"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("Bag"), "stdout={out:?}");
+}
+
+#[test]
+fn upsert_type_updates_node_type_to_enum() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "upsert_enum.rs",
+        "impl Kind { fn touch() {} }\nenum Kind { A, B }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="1"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    // Enum has 0 public fields; only quiet if node_type/public_fields stay consistent.
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn short_variable_inside_for_body_is_recorded() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "for_body.rs",
+        "fn work() {\n    for _ in 0..1 {\n        let z = 1;\n        let _ = z;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("like z."), "stdout={out:?}");
+}
+
+#[test]
+fn short_variable_inside_for_iterable_is_recorded() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "for_iter.rs",
+        "fn work() {\n    for _ in {\n        let w = 1;\n        0..w\n    } {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("like w."), "stdout={out:?}");
+}
+
+#[test]
+fn global_variable_compound_assign_ignores_rhs_and_nests() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "compound.rs",
+        "static mut DEST: i32 = 0;\nstatic mut SRC: i32 = 0;\nstatic mut NEST: i32 = 0;\nfn bump() {\n    unsafe {\n        DEST += SRC;\n        DEST += { NEST = 2; 1 };\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "design",
+        "--only",
+        "GlobalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("DEST"), "stdout={out:?}");
+    assert!(out.contains("NEST"), "stdout={out:?}");
+    assert!(!out.contains("SRC"), "compound rhs quiet: stdout={out:?}");
+}
+
+#[test]
+fn union_fields_count_for_too_many_fields() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "un.rs",
+        "union Pair { a: i32, b: i32, c: i32 }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "tmf.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="tmf">
+  <rule ref="codesize/TooManyFields">
+    <properties>
+      <property name="maxfields" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("union"), "stdout={out:?}");
+    assert!(out.contains("Pair"), "stdout={out:?}");
+}
+
+#[test]
+fn short_variable_inside_while_condition_is_recorded() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while_cond.rs",
+        "fn work() {\n    while {\n        let v = false;\n        v\n    } {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("like v."), "stdout={out:?}");
+}
