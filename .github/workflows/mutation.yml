@@ -1,0 +1,85 @@
+name: Mutation
+
+# Accepted residual risk: a pull request can pass the diff-aware gate and still
+# lower the whole-crate score. The push job on main is the detector, not a
+# preventer. It reports the fall after the merge. The pull-request job does not
+# protect the whole-crate score.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation-pull-request:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Diff-aware mode needs the merge base and full history.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Install mutarust
+        run: cargo install mutarust --locked --version 0.1.2
+      - name: Run diff-aware mutation testing
+        # Per-mutant suite skips pack_install_smoke so each mutant does not run
+        # cargo install. That exclusion lowers the measured score and never
+        # raises it.
+        env:
+          CARGO_BUILD_JOBS: "2"
+        run: |
+          mutarust --config mutarust.yml \
+            --coverage \
+            --git-diff-lines \
+            --git-diff-base origin/main \
+            --ignore-msi-with-no-mutations \
+            --min-msi 75 \
+            --min-covered-msi 80 \
+            --logger-github \
+            --workers 1 \
+            --exec-timeout 300 \
+            --test-flags "-- --skip pack_install_smoke" \
+            .
+
+  mutation-push:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Install mutarust
+        run: cargo install mutarust --locked --version 0.1.2
+      - name: Run full-crate mutation testing
+        # Per-mutant suite skips pack_install_smoke so each mutant does not run
+        # cargo install. That exclusion lowers the measured score and never
+        # raises it.
+        env:
+          CARGO_BUILD_JOBS: "2"
+        run: |
+          mutarust --config mutarust.yml \
+            --coverage \
+            --min-msi 75 \
+            --min-covered-msi 80 \
+            --logger-github \
+            --workers 1 \
+            --exec-timeout 300 \
+            --test-flags "-- --skip pack_install_smoke" \
+            .
