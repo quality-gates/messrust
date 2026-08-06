@@ -4,6 +4,12 @@ name: Mutation
 # lower the whole-crate score. The push job on main is the detector, not a
 # preventer. It reports the fall after the merge. The pull-request job does not
 # protect the whole-crate score.
+#
+# TEMPORARY: both jobs use `if: false`. The first full-crate push run on main
+# (actions run 31107735323) ended after ~88 minutes with exit 143 and
+# "runner has received a shutdown signal" — no mutarust score. Keep the job
+# bodies so the policy test still locks the gate shape. To re-enable later,
+# restore the event-name conditions on the pull-request job and the push job.
 
 on:
   push:
@@ -15,7 +21,7 @@ permissions:
 
 jobs:
   mutation-pull-request:
-    if: github.event_name == 'pull_request'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -53,7 +59,7 @@ jobs:
             .
 
   mutation-push:
-    if: github.event_name == 'push'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
