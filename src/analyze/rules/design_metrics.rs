@@ -257,7 +257,6 @@ fn expr_is_empty_block(expr: &syn::Expr) -> bool {
 fn pat_is_err(pat: &Pat) -> bool {
     match pat {
         Pat::TupleStruct(ts) => ts.path.segments.last().is_some_and(|s| s.ident == "Err"),
-        Pat::Ident(id) => id.ident == "Err",
         Pat::Or(p) => p.cases.iter().any(pat_is_err),
         _ => false,
     }
@@ -321,7 +320,7 @@ pub(crate) fn lcom4(t: &TypeModel<'_>) -> usize {
         .enumerate()
         .map(|(i, m)| (m.name.clone(), i))
         .collect();
-    let accessor_of = accessor_fields(t, &field_names);
+    let accessor_of = accessor_fields(t);
     let mut graph = CohesionGraph::new(t.methods.len());
 
     for (i, m) in t.methods.iter().enumerate() {
@@ -345,13 +344,10 @@ pub(crate) fn lcom4(t: &TypeModel<'_>) -> usize {
 }
 
 
-fn accessor_fields(
-    model: &TypeModel<'_>,
-    field_names: &HashSet<String>,
-) -> HashMap<String, String> {
+fn accessor_fields(model: &TypeModel<'_>) -> HashMap<String, String> {
     let mut accessors = HashMap::new();
     for method in &model.methods {
-        if let Some(field) = accessor_field(method, field_names) {
+        if let Some(field) = accessor_field(method) {
             accessors.insert(method.name.clone(), field);
         }
     }
@@ -437,7 +433,7 @@ impl CohesionGraph {
 }
 
 
-fn accessor_field(m: &MethodRef<'_>, _fields: &HashSet<String>) -> Option<String> {
+fn accessor_field(m: &MethodRef<'_>) -> Option<String> {
     let body = m.body?;
     if body.stmts.len() != 1 {
         return None;
