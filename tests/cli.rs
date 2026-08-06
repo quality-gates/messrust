@@ -733,6 +733,22 @@ fn minimumpriority_drops_lower_priority_rules() {
 }
 
 #[test]
+fn minimumpriority_one_is_accepted() {
+    // Kills parse_priority range mutant `1..=5` → `2..=5`.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--minimumpriority",
+        "1",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
 fn maximumpriority_drops_higher_priority_rules() {
     // maximumpriority 4 keeps priority >= 4; ExcessiveParameterList (3) drops.
     let dir = TempDir::new().unwrap();
@@ -746,6 +762,65 @@ fn maximumpriority_drops_higher_priority_rules() {
     ]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn maximumpriority_five_is_accepted() {
+    // Kills parse_priority range mutant that rejects 5; filters EPL (priority 3).
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--maximumpriority",
+        "5",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn value_option_before_positionals_consumes_exactly_one_argument() {
+    // Kills parse_args `i += 1` body/±1 mutants on the value skip.
+    // Correct: suffixes=[.txt] so hit.txt is analyzed and miss.rs is not.
+    let dir = TempDir::new().unwrap();
+    write_file(dir.path(), "hit.txt", &fixture_with_params(11));
+    write_file(dir.path(), "miss.rs", &fixture_with_params(11));
+    let (code, out, err) = run_cli(&[
+        "--suffixes",
+        "txt",
+        dir.path().to_str().unwrap(),
+        "text",
+        "codesize",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("hit.txt"), "stdout={out:?}");
+    assert!(!out.contains("miss.rs"), "stdout={out:?}");
+}
+
+#[test]
+fn value_option_does_not_skip_the_following_flag() {
+    // Kills parse_args `i += 2` mutant: must still honour ignore-violations.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let report = dir.path().join("out.txt");
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--reportfile",
+        report.to_str().unwrap(),
+        "--ignore-violations-on-exit",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(report.is_file(), "report missing");
+    let body = fs::read_to_string(&report).unwrap();
+    assert!(
+        body.contains("ExcessiveParameterList"),
+        "report={body:?}"
+    );
 }
 
 #[test]

@@ -7,6 +7,10 @@ MATCH="${1:?usage: mutarust-fn-batch.sh <function_name> [extra mutarust args...]
 shift || true
 
 free_mb() {
+  if command -v free >/dev/null 2>&1; then
+    free -m | awk '/^Mem:/ {print $7}'
+    return
+  fi
   local pages
   pages=$(vm_stat | awk '/Pages free/ {gsub("\\.","",$3); print $3}')
   echo $((pages * 16384 / 1024 / 1024))
@@ -50,16 +54,29 @@ echo "START match=${MATCH} free_mb=${free} TMPDIR=${TMPDIR}"
 WD_PID=$!
 
 set +e
-script -q "$LOG" env TMPDIR="$TMPDIR" CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS" mutarust \
-  --config mutarust.yml \
-  --workers 1 \
-  --exec-timeout 90 \
-  --min-msi 0 \
-  --min-covered-msi 0 \
-  --test-flags "--test cli --lib" \
-  --match "$MATCH" \
-  "$@" \
+EXTRA_ARGS=()
+if (($# > 0)); then
+  EXTRA_ARGS=("$@")
+fi
+MUTA_CMD=(
+  env "TMPDIR=$TMPDIR" "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS" mutarust
+  --config mutarust.yml
+  --workers 1
+  --exec-timeout 90
+  --min-msi 0
+  --min-covered-msi 0
+  --test-flags "--test cli --lib"
+  --match "$MATCH"
+  "${EXTRA_ARGS[@]}"
   src/lib.rs src/main.rs
+)
+if script --version >/dev/null 2>&1; then
+  # GNU script (Linux): -c runs a shell command string.
+  script -q -c "$(printf '%q ' "${MUTA_CMD[@]}")" "$LOG"
+else
+  # BSD script (macOS): log path then command argv.
+  script -q "$LOG" "${MUTA_CMD[@]}"
+fi
 rc=$?
 set -e
 
