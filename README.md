@@ -173,15 +173,10 @@ rustup component add llvm-tools-preview
 The committed policy file is `mutarust.yml`. It sets `min_msi: 75` and
 `min_covered_msi: 80`. These thresholds do not move down.
 
-CI defines the gate in two modes. On a pull request, the workflow mutates only
-the changed production lines. On a push to `main`, it mutates all production
-source. A green pull-request job does not prove the whole-crate score. Only the
-job on `main` measures that number.
-
-Those CI jobs are temporarily off (`if: false` in `.github/workflows/mutation.yml`)
-after the first full-crate push run shut down the GitHub-hosted runner. The job
-bodies stay in the workflow so the policy test keeps the gate shape. Re-enable
-them when the full-crate run can finish on the runner.
+CI runs the gate in two modes. On a pull request, the workflow mutates only the
+changed production lines. On a push to `main`, it mutates all production source.
+A green pull-request job does not prove the whole-crate score. Only the job on
+`main` measures that number.
 
 The selected target is `.`. `mutarust --list-files .` lists every production
 source file under `src`.
