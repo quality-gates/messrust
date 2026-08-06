@@ -952,7 +952,7 @@ fn lack_of_cohesion_skips_multi_statement_bodies_as_accessors() {
     let path = write_file(
         dir.path(),
         "multi.rs",
-        "struct S {\n    a: i32,\n    b: i32,\n}\nimpl S {\n    fn get_a(&self) -> i32 {\n        let x = self.a;\n        x\n    }\n    fn bump_a(&mut self) { self.a += 1; }\n    fn bump_b(&mut self) { self.b += 1; }\n}\n",
+        "struct S {\n    a: i32,\n    b: i32,\n}\nimpl S {\n    fn weird(&self) -> i32 {\n        self.a;\n        0\n    }\n    fn only_b(&mut self) { self.b += 1; }\n}\n",
     );
     let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
