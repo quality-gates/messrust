@@ -44,17 +44,13 @@ pub(crate) fn bool_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token
 
 
 pub(crate) fn collect_bool_param_names(pat: &Pat, out: &mut Vec<BoolParam>) {
+    // bool_params only invokes this when the parameter type path is `bool`, so
+    // tuple/paren destructuring patterns cannot appear here.
     match pat {
         Pat::Ident(id) => out.push(BoolParam {
             name: id.ident.to_string(),
             begin_line: id.ident.span().start().line,
         }),
-        Pat::Tuple(t) => {
-            for p in &t.elems {
-                collect_bool_param_names(p, out);
-            }
-        }
-        Pat::Paren(p) => collect_bool_param_names(&p.pat, out),
         Pat::Reference(r) => collect_bool_param_names(&r.pat, out),
         _ => {}
     }
@@ -230,9 +226,7 @@ impl<'a> FileModel<'a> {
         let mut statics = StaticMutCollector::default();
         statics.visit_file(file);
 
-        let mut types: Vec<_> = types.into_values().collect();
-        types.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
-        functions.sort_by(|a, b| a.begin_line.cmp(&b.begin_line).then(a.name.cmp(&b.name)));
+        let types: Vec<_> = types.into_values().collect();
         Self {
             src,
             functions,

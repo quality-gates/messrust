@@ -428,6 +428,117 @@ fn short_method_name_message_includes_parent_name_and_minimum() {
 // --- --ignore-tests range scan ----------------------------------------------
 
 #[test]
+fn boolean_argument_flag_scans_past_receiver_and_non_bool() {
+    let dir = TempDir::new().unwrap();
+    // continue-on-receiver / continue-on-non-bool must keep scanning to `flag`.
+    let path = write_file(
+        dir.path(),
+        "baf.rs",
+        "struct Host;\nimpl Host {\n    fn configure(&self, count: i32, flag: bool) { let _ = (count, flag); }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "cleancode",
+        "--only",
+        "BooleanArgumentFlag",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "BooleanArgumentFlag",
+        "The method Host::configure has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.",
+    );
+}
+
+#[test]
+fn too_many_fields_unit_struct_stays_quiet_at_zero_max() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "unit.rs", "struct Empty;\n");
+    let xml = write_file(
+        dir.path(),
+        "tmf.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="tmf">
+  <rule ref="codesize/TooManyFields">
+    <properties>
+      <property name="maxfields" value="0"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn excessive_public_count_unit_struct_stays_quiet_at_one() {
+    let dir = TempDir::new().unwrap();
+    // Unit structs contribute (0, 0) field stats. A mutant that sets public_fields to 1
+    // would fire ExcessivePublicCount at minimum 1.
+    let path = write_file(dir.path(), "unit_pub.rs", "struct Empty;\n");
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="1"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn boolean_argument_flag_collects_ref_pattern() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "pats.rs",
+        "fn ref_flag(ref flag: bool) { let _ = flag; }\nfn plain(flag: bool) { let _ = flag; }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "cleancode",
+        "--only",
+        "BooleanArgumentFlag",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ref_flag"), "stdout={out:?}");
+    assert!(out.contains("plain"), "stdout={out:?}");
+}
+
+
+#[test]
+fn duplicated_array_key_still_runs_duplicate_collector() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "dup.rs",
+        "struct Point { x: i32, y: i32 }\nfn main() {\n    let _ = Point { x: 1, x: 2, y: 3 };\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "cleancode",
+        "--only",
+        "DuplicatedArrayKey",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("DuplicatedArrayKey"), "stdout={out:?}");
+    assert!(out.contains("Duplicated array key x"), "stdout={out:?}");
+}
+
+#[test]
 fn ignore_tests_range_uses_inclusive_module_span_boundaries() {
     let dir = TempDir::new().unwrap();
     // Violation on the first and last lines inside the cfg(test) module must drop.
