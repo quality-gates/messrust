@@ -1017,6 +1017,32 @@ fn too_many_fields_skips_enum_variants() {
 }
 
 #[test]
+fn too_many_fields_continues_after_skipped_enum() {
+    let dir = TempDir::new().unwrap();
+    // Enum first (continue). A break mutant would stop the loop and miss Big.
+    let variants: String = (0..4).map(|i| format!("    V{i},\n")).collect();
+    let fields: String = (0..16).map(|i| format!("    f{i}: i32,\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "mix.rs",
+        &format!("enum Skip {{\n{variants}}}\n\nstruct Big {{\n{fields}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "TooManyFields");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        8,
+        "TooManyFields",
+        "The struct Big has 16 fields. Consider redesigning Big to keep the number of fields under 15.",
+    );
+    assert!(
+        !out.contains("Skip"),
+        "enum must stay quiet: stdout={out:?}"
+    );
+}
+
+#[test]
 fn too_many_fields_struct_exact_message_above_fifteen() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "s.rs", &fields_src("struct", "Big", 16));
