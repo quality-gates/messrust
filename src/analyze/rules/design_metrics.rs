@@ -489,10 +489,6 @@ fn receiver_uses(
         called: &mut called,
     };
     visitor.visit_block(body);
-    used_fields.sort();
-    used_fields.dedup();
-    called.sort();
-    called.dedup();
     (used_fields, called)
 }
 
