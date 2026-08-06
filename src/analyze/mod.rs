@@ -122,7 +122,7 @@ pub(crate) fn collect_test_module_ranges(items: &[Item], ranges: &mut Vec<(usize
 pub(crate) type RuleHandler = fn(&LoadedRule, &str, &FileModel<'_>, &mut Vec<Violation>);
 
 
-pub(crate) const RULE_HANDLERS: [RuleHandler; RuleKind::COUNT] = [
+pub(crate) const RULE_HANDLERS: &[RuleHandler] = &[
     apply_cyclomatic_complexity,
     apply_npath_complexity,
     apply_excessive_method_length,

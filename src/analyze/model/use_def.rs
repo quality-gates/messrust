@@ -99,7 +99,6 @@ pub(crate) fn visit_assignment_place(collector: &mut UseDefCollector, target: &s
             collector.visit_expr(&index.index);
         }
         syn::Expr::Paren(paren) => visit_assignment_target(collector, &paren.expr),
-        syn::Expr::Group(group) => visit_assignment_target(collector, &group.expr),
         _ => collector.visit_expr(target),
     }
 }
@@ -107,9 +106,6 @@ pub(crate) fn visit_assignment_place(collector: &mut UseDefCollector, target: &s
 
 impl<'ast> Visit<'ast> for UseDefCollector {
     fn visit_local(&mut self, node: &'ast syn::Local) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         with_binding_mode(self, BindingMode::Local, |visitor| {
             visitor.visit_pat(&node.pat)
         });
@@ -127,31 +123,23 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
-        let prev = self.in_trait_impl;
         self.in_trait_impl = node.trait_.is_some();
         syn::visit::visit_item_impl(self, node);
-        self.in_trait_impl = prev;
     }
 
     fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
-        let previous = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_struct(self, node);
-        self.derived_fields_are_used = previous;
     }
 
     fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
-        let previous = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_enum(self, node);
-        self.derived_fields_are_used = previous;
     }
 
     fn visit_item_union(&mut self, node: &'ast ItemUnion) {
-        let previous = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_union(self, node);
-        self.derived_fields_are_used = previous;
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
@@ -181,13 +169,9 @@ impl<'ast> Visit<'ast> for UseDefCollector {
                 });
             }
         }
-        syn::visit::visit_field(self, node);
     }
 
     fn visit_arm(&mut self, node: &'ast syn::Arm) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         with_binding_mode(self, BindingMode::Local, |visitor| {
             visitor.visit_pat(&node.pat)
         });
@@ -198,9 +182,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         with_binding_mode(self, BindingMode::Local, |visitor| {
             visitor.visit_pat(&node.pat)
         });
@@ -209,9 +190,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         if let syn::Expr::Let(l) = &*node.cond {
             with_binding_mode(self, BindingMode::Local, |visitor| {
                 visitor.visit_pat(&l.pat)
@@ -224,9 +202,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         if let syn::Expr::Let(l) = &*node.cond {
             with_binding_mode(self, BindingMode::Local, |visitor| {
                 visitor.visit_pat(&l.pat)
@@ -268,13 +243,10 @@ impl<'ast> Visit<'ast> for UseDefCollector {
 
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
         if let Some(ident) = path_single_ident(node) {
-            if ident != "self" && ident != "Self" {
-                self.model.ident_reads.insert(ident);
-            }
+            self.model.ident_reads.insert(ident);
         } else if let Some(ident) = path_last_ident(node) {
             self.model.method_calls.insert(ident);
         }
-        syn::visit::visit_expr_path(self, node);
     }
 
     fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
@@ -303,7 +275,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
         if is_format_macro(node) {
             collect_format_captures(node.tokens.clone(), &mut self.model.ident_reads);
         }
-        syn::visit::visit_macro(self, node);
     }
 }
 
@@ -432,7 +403,8 @@ pub(crate) fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
 
 
 pub(crate) fn is_binding_name(name: &str) -> bool {
-    name != "self" && name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
+    // Syn never feeds the `self` receiver through PatIdent bindings we record.
+    name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
 }
 
 

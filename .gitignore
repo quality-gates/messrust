@@ -1,3 +1,8 @@
 /target/
 .DS_Store
 .scratch/
+
+mutarust-agentic.json
+mutarust-summary.json
+mutarust-report.html
+mutarust-baseline.json

@@ -45,8 +45,3 @@ pub enum RuleKind {
     CamelCaseVariableName,
 }
 
-
-impl RuleKind {
-    pub(crate) const COUNT: usize = Self::CamelCaseVariableName as usize + 1;
-}
-
