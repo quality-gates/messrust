@@ -682,7 +682,7 @@ fn coupling_includes_return_type_dependencies() {
 <ruleset name="cbo">
   <rule ref="design/CouplingBetweenObjects">
     <properties>
-      <property name="maximum" value="0"/>
+      <property name="maximum" value="1"/>
     </properties>
   </rule>
 </ruleset>
@@ -692,6 +692,98 @@ fn coupling_includes_return_type_dependencies() {
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("CouplingBetweenObjects"), "stdout={out:?}");
     assert!(out.contains("Host"), "stdout={out:?}");
+}
+
+#[test]
+fn upsert_type_updates_fields_when_struct_follows_impl() {
+    let dir = TempDir::new().unwrap();
+    // Impl first creates a synthetic type; struct upsert must replace field_count.
+    let path = write_file(
+        dir.path(),
+        "upsert.rs",
+        "impl Bag {\n    fn touch() {}\n}\nstruct Bag { a: i32, b: i32, c: i32 }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "tmf.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="tmf">
+  <rule ref="codesize/TooManyFields">
+    <properties>
+      <property name="maxfields" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("TooManyFields"), "stdout={out:?}");
+    assert!(out.contains("Bag"), "stdout={out:?}");
+}
+
+#[test]
+fn constant_naming_covers_static_impl_and_trait_consts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "consts.rs",
+        "static bad_static: i32 = 1;\nstruct Host;\nimpl Host { const bad_impl: i32 = 2; }\ntrait Marker { const bad_trait: i32; }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ConstantNamingConventions",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("bad_static"), "stdout={out:?}");
+    assert!(out.contains("bad_impl"), "stdout={out:?}");
+    assert!(out.contains("bad_trait"), "stdout={out:?}");
+}
+
+#[test]
+fn short_variable_skips_while_let_binder_and_reads_body() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while_let.rs",
+        "fn work(mut items: impl Iterator<Item = i32>) {\n    while let Some(x) = items.next() {\n        let y = x;\n        let _ = y;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        !out.contains("argument x") && !out.contains("like x."),
+        "while-let binder quiet: stdout={out:?}"
+    );
+    assert!(out.contains("like y."), "body short var must report: stdout={out:?}");
+}
+
+#[test]
+fn global_variable_tracks_assign_and_compound_assign() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "glob.rs",
+        "static mut COUNTER: i32 = 0;\nstatic mut OTHER: i32 = 0;\nfn bump() {\n    unsafe {\n        COUNTER = 1;\n        OTHER += 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "design",
+        "--only",
+        "GlobalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("COUNTER"), "stdout={out:?}");
+    assert!(out.contains("OTHER"), "stdout={out:?}");
 }
 
 #[test]

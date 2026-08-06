@@ -42,7 +42,6 @@ impl<'ast> Visit<'ast> for DuplicateKeyCollector {
                 seen.insert(name, line);
             }
         }
-        syn::visit::visit_expr_struct(self, node);
     }
 }
 
@@ -56,9 +55,6 @@ pub(crate) struct BindingCollector {
 
 impl<'ast> Visit<'ast> for BindingCollector {
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         self.loop_pat_depth += 1;
         self.visit_pat(&node.pat);
         self.loop_pat_depth -= 1;
@@ -67,9 +63,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
     }
 
     fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         if let syn::Expr::Let(l) = &*node.cond {
             self.loop_pat_depth += 1;
             self.visit_pat(&l.pat);
@@ -89,7 +82,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
                 is_loop_binder: self.loop_pat_depth > 0,
             });
         }
-        syn::visit::visit_pat_ident(self, node);
     }
 
     fn visit_field(&mut self, node: &'ast syn::Field) {
@@ -100,7 +92,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
                 is_loop_binder: false,
             });
         }
-        syn::visit::visit_field(self, node);
     }
 
     fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
@@ -109,7 +100,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
             begin_line: node.ident.span().start().line,
             is_loop_binder: false,
         });
-        syn::visit::visit_item_const(self, node);
     }
 
     fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
@@ -118,7 +108,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
             begin_line: node.ident.span().start().line,
             is_loop_binder: false,
         });
-        syn::visit::visit_item_static(self, node);
     }
 
     fn visit_impl_item_const(&mut self, node: &'ast syn::ImplItemConst) {
@@ -127,7 +116,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
             begin_line: node.ident.span().start().line,
             is_loop_binder: false,
         });
-        syn::visit::visit_impl_item_const(self, node);
     }
 
     fn visit_trait_item_const(&mut self, node: &'ast syn::TraitItemConst) {
@@ -136,7 +124,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
             begin_line: node.ident.span().start().line,
             is_loop_binder: false,
         });
-        syn::visit::visit_trait_item_const(self, node);
     }
 }
 
@@ -482,7 +469,6 @@ impl<'ast> Visit<'ast> for TypeNameCollector<'_> {
         if let Some(segment) = node.path.segments.last() {
             self.names.push(segment.ident.to_string());
         }
-        syn::visit::visit_type_path(self, node);
     }
 }
 
@@ -529,7 +515,6 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
                 begin_line: node.ident.span().start().line,
             });
         }
-        syn::visit::visit_item_static(self, node);
     }
 
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
@@ -538,7 +523,6 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
                 self.mutated.insert(ident);
             }
         }
-        syn::visit::visit_expr_path(self, node);
     }
 
     fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
@@ -566,8 +550,6 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
             self.visit_expr(&node.left);
             self.assign_lhs = false;
             self.visit_expr(&node.right);
-        } else {
-            syn::visit::visit_expr_binary(self, node);
         }
     }
 }
