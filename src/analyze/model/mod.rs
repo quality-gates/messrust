@@ -98,7 +98,6 @@ pub(crate) fn returns_bool(output: &ReturnType) -> bool {
 pub(crate) struct NamedBinding {
     pub(crate) name: String,
     pub(crate) begin_line: usize,
-    pub(crate) is_loop_binder: bool,
 }
 
 
@@ -213,7 +212,6 @@ impl<'a> FileModel<'a> {
         let mut binder = BindingCollector {
             variables: Vec::new(),
             constants: Vec::new(),
-            loop_pat_depth: 0,
         };
         binder.visit_file(file);
 

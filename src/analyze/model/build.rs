@@ -49,24 +49,19 @@ impl<'ast> Visit<'ast> for DuplicateKeyCollector {
 pub(crate) struct BindingCollector {
     pub(crate) variables: Vec<NamedBinding>,
     pub(crate) constants: Vec<NamedBinding>,
-    pub(crate) loop_pat_depth: usize,
 }
 
 
 impl<'ast> Visit<'ast> for BindingCollector {
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        self.loop_pat_depth += 1;
-        self.visit_pat(&node.pat);
-        self.loop_pat_depth -= 1;
+        // Skip the loop pattern: naming rules treat binders as out of scope, which
+        // matches not recording them at all.
         self.visit_expr(&node.expr);
         self.visit_block(&node.body);
     }
 
     fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
         if let syn::Expr::Let(l) = &*node.cond {
-            self.loop_pat_depth += 1;
-            self.visit_pat(&l.pat);
-            self.loop_pat_depth -= 1;
             self.visit_expr(&l.expr);
         } else {
             self.visit_expr(&node.cond);
@@ -79,7 +74,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
             self.variables.push(NamedBinding {
                 name: node.ident.to_string(),
                 begin_line: node.ident.span().start().line,
-                is_loop_binder: self.loop_pat_depth > 0,
             });
         }
     }
@@ -89,7 +83,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
             self.variables.push(NamedBinding {
                 name: ident.to_string(),
                 begin_line: ident.span().start().line,
-                is_loop_binder: false,
             });
         }
     }
@@ -98,7 +91,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
         self.constants.push(NamedBinding {
             name: node.ident.to_string(),
             begin_line: node.ident.span().start().line,
-            is_loop_binder: false,
         });
     }
 
@@ -106,7 +98,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
         self.constants.push(NamedBinding {
             name: node.ident.to_string(),
             begin_line: node.ident.span().start().line,
-            is_loop_binder: false,
         });
     }
 
@@ -114,7 +105,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
         self.constants.push(NamedBinding {
             name: node.ident.to_string(),
             begin_line: node.ident.span().start().line,
-            is_loop_binder: false,
         });
     }
 
@@ -122,7 +112,6 @@ impl<'ast> Visit<'ast> for BindingCollector {
         self.constants.push(NamedBinding {
             name: node.ident.to_string(),
             begin_line: node.ident.span().start().line,
-            is_loop_binder: false,
         });
     }
 }

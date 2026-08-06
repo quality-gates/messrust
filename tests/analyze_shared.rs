@@ -816,3 +816,96 @@ fn nested_only(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7
         "nested cfg(test) must drop: stdout={out:?}"
     );
 }
+
+#[test]
+fn upsert_type_updates_public_fields_and_begin_line() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "upsert_pub.rs",
+        "impl Bag {\n    fn touch() {}\n}\nstruct Bag { pub a: i32, pub b: i32 }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessivePublicCount"), "stdout={out:?}");
+    // begin_line must be the struct line (4), not the earlier impl line (1).
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "ExcessivePublicCount",
+        "The struct Bag has 2 public methods and attributes. Consider reducing the number of public items to less than 2.",
+    );
+}
+
+#[test]
+fn global_variable_does_not_mark_rhs_static_as_mutated() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "rhs.rs",
+        "static mut DEST: i32 = 0;\nstatic mut SRC: i32 = 0;\nfn copy() {\n    unsafe { DEST = SRC; }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "design",
+        "--only",
+        "GlobalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("DEST"), "stdout={out:?}");
+    assert!(!out.contains("SRC"), "rhs must stay quiet: stdout={out:?}");
+}
+
+#[test]
+fn global_variable_tracks_nested_assign_on_rhs() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested_as.rs",
+        "static mut A: i32 = 0;\nstatic mut B: i32 = 0;\nfn work() {\n    unsafe { A = { B = 1; 0 }; }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "design",
+        "--only",
+        "GlobalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("A"), "stdout={out:?}");
+    assert!(out.contains("B"), "nested rhs assign must count: stdout={out:?}");
+}
+
+#[test]
+fn upsert_type_replaces_empty_fields_from_synthetic_impl() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "upsert_fields.rs",
+        "impl Bag {\n    fn touch(&self) {}\n}\nstruct Bag { unused_item: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("unused_item"), "stdout={out:?}");
+}

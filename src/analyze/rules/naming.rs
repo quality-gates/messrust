@@ -74,9 +74,6 @@ pub(crate) fn apply_short_variable(
     let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
     let exceptions = property_list(rule, "exceptions");
     for v in &model.variables {
-        if v.is_loop_binder {
-            continue;
-        }
         if v.name.chars().count() >= minimum {
             continue;
         }
@@ -103,9 +100,6 @@ pub(crate) fn apply_long_variable(
     let prefixes = property_list(rule, "subtract-prefixes");
     let suffixes = property_list(rule, "subtract-suffixes");
     for v in &model.variables {
-        if v.is_loop_binder {
-            continue;
-        }
         let effective = length_without(&v.name, &prefixes, &suffixes);
         if effective <= maximum {
             continue;
