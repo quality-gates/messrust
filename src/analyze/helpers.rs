@@ -152,15 +152,16 @@ pub(crate) fn property_list(rule: &LoadedRule, key: &str) -> Vec<String> {
 
 
 pub(crate) fn length_without(name: &str, prefixes: &[String], suffixes: &[String]) -> usize {
+    // Callers pass lists from property_list, which already drops empty entries.
     let mut effective = name;
     for p in prefixes {
-        if !p.is_empty() && effective.starts_with(p.as_str()) {
+        if effective.starts_with(p.as_str()) {
             effective = &effective[p.len()..];
             break;
         }
     }
     for s in suffixes {
-        if !s.is_empty() && effective.ends_with(s.as_str()) {
+        if effective.ends_with(s.as_str()) {
             effective = &effective[..effective.len() - s.len()];
             break;
         }
@@ -212,7 +213,8 @@ pub(crate) fn is_snake_case(name: &str) -> bool {
 
 
 pub(crate) fn is_tuple_field_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_digit())
+    // Model tuple fields use decimal index strings ("0", "1", …); empty never appears.
+    name.chars().all(|c| c.is_ascii_digit())
 }
 
 
@@ -282,6 +284,6 @@ pub(crate) fn is_private(vis: &Visibility) -> bool {
 
 
 pub(crate) fn is_rust_unused_name(name: &str) -> bool {
-    name == "_" || name.starts_with('_')
+    name.starts_with('_')
 }
 
