@@ -794,6 +794,140 @@ fn empty_trait_public_fields_stay_zero() {
 }
 
 #[test]
+fn unused_private_field_from_struct_pattern_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "field_pat.rs",
+        "struct Host { live: i32, dead: i32 }\nfn work(h: Host) {\n    let Host { live, .. } = h;\n    let _ = live;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+    assert!(!out.contains("'live'"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_from_nested_field_pattern_binder() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested_field_pat.rs",
+        "enum Wrap { Cell { value: Option<i32> } }\nfn work(item: Wrap) {\n    match item {\n        Wrap::Cell { value: Some(inner) } => {}\n        _ => {}\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("inner"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_field_read_counts_base() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "field_read_base.rs",
+        "struct Wrapper { inner: i32 }\nfn work() {\n    let host = Wrapper { inner: 0 };\n    let _ = host.inner;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_formal_parameter_method_arg_is_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "method_arg_read.rs",
+        "struct Host;\nimpl Host {\n    fn method(&self, arg: i32) { let _ = arg; }\n}\nfn work(host: Host, value: i32) {\n    host.method(value);\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn boolean_argument_flag_skips_non_bool_typed_params() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "non_bool_flag.rs",
+        "fn work(flag: i32) {\n    if flag != 0 {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "cleancode",
+        "--only",
+        "BooleanArgumentFlag",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn macro_after_dot_clears_before_next_ident_field() {
+    let dir = TempDir::new().unwrap();
+    // After reading `live`, after_dot must clear so `dead` is not a field read.
+    let path = write_file(
+        dir.path(),
+        "mac_dot_clear.rs",
+        "struct Host { live: i32, dead: i32 }\nfn show(h: &Host) {\n    let _ = stringify!(h.live dead);\n    let _ = h;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+    assert!(!out.contains("'live'"), "stdout={out:?}");
+}
+
+#[test]
+fn macro_after_group_clears_after_dot_from_before_group() {
+    let dir = TempDir::new().unwrap();
+    // `h.` sets after_dot; the group must clear it before `dead`.
+    let path = write_file(
+        dir.path(),
+        "mac_dot_group.rs",
+        "struct Host { live: i32, dead: i32 }\nfn show(h: &Host) {\n    let _ = stringify!(h.(live) dead);\n    let _ = h;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
 fn enum_public_fields_stay_zero_for_public_count() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "en.rs", "enum Kind { A, B }\n");

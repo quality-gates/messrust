@@ -123,10 +123,8 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
-        let prev = self.in_trait_impl;
         self.in_trait_impl = node.trait_.is_some();
         syn::visit::visit_item_impl(self, node);
-        self.in_trait_impl = prev;
     }
 
     fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
@@ -406,7 +404,8 @@ pub(crate) fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
 
 pub(crate) fn is_binding_name(name: &str) -> bool {
     // Syn never feeds the `self` receiver through PatIdent bindings we record.
-    name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
+    // Underscore-prefixed names are skipped later by unused-code rules.
+    name.starts_with(|ch: char| ch.is_lowercase())
 }
 
 
