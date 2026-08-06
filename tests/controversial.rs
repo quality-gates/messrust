@@ -192,7 +192,21 @@ fn camel_case_class_name_rejects_pascal_case_with_underscore() {
 fn camel_case_class_name_default_allows_consecutive_caps() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "http.rs", "struct HTTPClient;\n");
-    let (code, out, err) = run_only(&path, "CamelCaseClassName");
+    let xml = dir.path().join("bare.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="bare">
+  <rule name="CamelCaseClassName"
+         message="The type {0} is not named in PascalCase."
+         class="PHPMD\Rule\Controversial\CamelCaseClassName">
+    <priority>1</priority>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
 
