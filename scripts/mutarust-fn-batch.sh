@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Memory-safe single-function mutarust batch for 16 GB hosts.
-# Prefer one function per run. For large functions, also pass --enable <mutator>.
+# Prefer one function per run. For large functions, also pass --enable 'group/*'.
+#
+# Uses mutarust.yml thresholds (75 / 80). For iterative kill work before the
+# score is ready, pass overrides as extra args, e.g.:
+#   ./scripts/mutarust-fn-batch.sh parse_args --min-msi 0 --min-covered-msi 0
 set -euo pipefail
 
 MIN_FREE_MB="${MIN_FREE_MB:-3000}"
@@ -41,8 +45,12 @@ rm -f "$LOG"
 
 echo "START match=${MATCH} free_mb=${free} TMPDIR=${TMPDIR} jobs=${CARGO_BUILD_JOBS}"
 
-# Watchdog: kill mutarust if free RAM collapses mid-run.
+# Watchdog: wait for mutarust to appear, then kill it if free RAM collapses.
 (
+  for _ in $(seq 1 120); do
+    pgrep -x mutarust >/dev/null 2>&1 && break
+    sleep 0.5
+  done
   while pgrep -x mutarust >/dev/null 2>&1; do
     f=$(free_mb)
     if (( f < WATCHDOG_FREE_MB )); then
@@ -66,8 +74,6 @@ MUTA_CMD=(
   --config mutarust.yml
   --workers 1
   --exec-timeout 60
-  --min-msi 0
-  --min-covered-msi 0
   --test-flags "--test cli --lib"
   --match "$MATCH"
   "${EXTRA_ARGS[@]}"

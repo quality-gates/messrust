@@ -1078,11 +1078,16 @@ fn unknown_format_lists_available_formats() {
 #[test]
 fn comma_separated_rulesets_all_load() {
     let dir = TempDir::new().unwrap();
-    // Use two component names so split_list on the ruleset positional runs.
-    let hot = write_file(dir.path(), "hot.rs", &fixture_with_params(11));
+    // codesize finds ExcessiveParameterList; naming (opinionated) finds ShortVariable.
+    let hot = write_file(
+        dir.path(),
+        "hot.rs",
+        "fn entry_point(param_0: i32, param_1: i32, param_2: i32, param_3: i32, param_4: i32, param_5: i32, param_6: i32, param_7: i32, param_8: i32, param_9: i32, param_10: i32) { let x = 1; let _ = x; }\n",
+    );
     let (code, out, err) = run_cli(&[hot.to_str().unwrap(), "text", "codesize,naming"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+    assert!(out.contains("ShortVariable"), "naming ruleset must load: stdout={out:?}");
 }
 
 #[test]
