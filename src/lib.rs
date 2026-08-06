@@ -335,12 +335,3 @@ fn source_suffixes(configured: &[String]) -> Vec<String> {
         configured.to_vec()
     }
 }
-
-/// Temporary untested helper for the #48 gate demo. Remove after CI fails.
-pub fn gate_demo_untested(x: i32) -> i32 {
-    if x > 0 {
-        x + 1
-    } else {
-        x - 1
-    }
-}
