@@ -381,6 +381,26 @@ fn excessive_class_length_adds_each_impl_method_line_span() {
 // --- format_message with more than one argument -----------------------------
 
 #[test]
+fn analyze_sorts_violations_by_file_then_line_across_rules() {
+    let dir = TempDir::new().unwrap();
+    // ShortVariable (line 1) is applied after ShortClassName (line 3) in RULE_HANDLERS.
+    // Without the final sort, the class finding would appear first.
+    let path = write_file(
+        dir.path(),
+        "order.rs",
+        "fn work() { let x = 1; let _ = x; }\n\nstruct Ab;\n",
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "naming"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    let var_at = out.find("ShortVariable").expect("ShortVariable");
+    let class_at = out.find("ShortClassName").expect("ShortClassName");
+    assert!(
+        var_at < class_at,
+        "violations must sort by begin line: stdout={out:?}"
+    );
+}
+
+#[test]
 fn short_method_name_message_includes_parent_name_and_minimum() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
