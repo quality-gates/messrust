@@ -1243,3 +1243,128 @@ fn unused_local_not_misclassified_as_parameter_after_bindings() {
     ]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
+
+#[test]
+fn upsert_type_node_type_appears_in_public_count_message() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "upsert_msg.rs",
+        "impl Kind {\n    pub fn a() {}\n    pub fn b() {}\n}\nenum Kind { X }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        out.contains("The enum Kind has 2 public methods"),
+        "node_type must update to enum: stdout={out:?}"
+    );
+}
+
+#[test]
+fn unused_local_does_not_record_closure_params_via_leaked_binding_mode() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "closure_mode.rs",
+        "fn work() {\n    let f = |z| 1;\n    let _ = f;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    // `f` is used; closure param `z` must not be recorded as a local via leaked mode.
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_counts_nested_format_capture_group() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fmt_group.rs",
+        "fn work() {\n    let name = 1;\n    println!(\"{}\", { name });\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_derive_debug_does_not_count_as_serde() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "debug_derive.rs",
+        "#[derive(Debug)]\nstruct Host { only_field: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("only_field"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_not_kept_alive_by_leading_macro_ident() {
+    let dir = TempDir::new().unwrap();
+    // If after_dot starts true, the first macro ident `name` is stored as a field read.
+    let path = write_file(
+        dir.path(),
+        "mac_lead.rs",
+        "struct Host { name: i32 }\nfn show() {\n    println!(\"{}\", name);\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("name"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_counts_field_inside_macro_group() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mac_group.rs",
+        "struct Host { used_field: i32, dead_field: i32 }\nfn show(h: &Host) {\n    println!(\"{}\", (h.used_field));\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead_field"), "stdout={out:?}");
+    assert!(!out.contains("used_field"), "stdout={out:?}");
+}
