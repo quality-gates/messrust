@@ -86,7 +86,7 @@ fn unused_local_variable_skips_underscore_names() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
-        "us.rs",
+        "underscore_locals.rs",
         "fn f() {\n    let _ = 1;\n    let _ignored = 2;\n}\n",
     );
     let (code, out, err) = run_only(&path, "UnusedLocalVariable");
@@ -98,7 +98,7 @@ fn unused_local_variable_reports_after_underscore_name() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
-        "us_then_dead.rs",
+        "underscore_then_dead_local.rs",
         "fn f() {\n    let _ignored = 1;\n    let dead_local = 2;\n}\n",
     );
     let (code, out, err) = run_only(&path, "UnusedLocalVariable");
@@ -345,7 +345,7 @@ fn unused_formal_parameter_reports_after_underscore_param() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
-        "us_then_dead_param.rs",
+        "underscore_then_dead_param.rs",
         "fn f(_skip: i32, dead_param: i32) {}\n",
     );
     let (code, out, err) = run_only(&path, "UnusedFormalParameter");
@@ -417,6 +417,27 @@ fn unused_formal_parameter_counts_use_in_macro_argument() {
 }
 
 #[test]
+fn unused_formal_parameter_reports_unread_in_other_function() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "param_other_fn.rs",
+        "fn used_fn(kept: i32) -> i32 {\n    kept\n}\n\
+         fn unread_fn(dead_param: i32) {}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedFormalParameter");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "UnusedFormalParameter",
+        "Avoid unused parameters such as 'dead_param'.",
+    );
+    assert!(!out.contains("kept"), "stdout={out:?}");
+}
+
+#[test]
 fn unused_private_field_reports_unread_private_field() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
@@ -478,7 +499,7 @@ fn unused_private_field_skips_underscore_names() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
-        "us_field.rs",
+        "underscore_field.rs",
         "struct S {\n    _ignored: i32,\n}\n",
     );
     let (code, out, err) = run_only(&path, "UnusedPrivateField");
@@ -630,7 +651,7 @@ fn unused_private_method_skips_underscore_names() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
-        "us_method.rs",
+        "underscore_method.rs",
         "struct S;\nimpl S {\n    fn _ignored(&self) {}\n}\n",
     );
     let (code, out, err) = run_only(&path, "UnusedPrivateMethod");
