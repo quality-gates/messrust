@@ -575,6 +575,126 @@ fn last_line(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: 
 }
 
 #[test]
+fn nested_module_items_are_analyzed() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested_mod.rs",
+        "mod outer {\n    struct Ab;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortClassName",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "ShortClassName",
+        "Avoid types with short names like Ab. Configured minimum length is 3.",
+    );
+}
+
+#[test]
+fn impl_without_struct_still_builds_type_for_method_rules() {
+    let dir = TempDir::new().unwrap();
+    // attach_impl inserts a synthetic type when no prior struct exists.
+    let path = write_file(
+        dir.path(),
+        "orphan.rs",
+        "impl Orphan {\n    fn go() {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortMethodName",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "ShortMethodName",
+        "Avoid using short method names like Orphan::go(). The configured minimum method name length is 3.",
+    );
+}
+
+#[test]
+fn trait_methods_count_for_too_many_methods() {
+    let dir = TempDir::new().unwrap();
+    let methods: String = (0..26).map(|i| format!("    fn m{i}(&self);\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "tr.rs",
+        &format!("pub trait Busy {{\n{methods}}}\n"),
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--only",
+        "TooManyMethods",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("TooManyMethods"), "stdout={out:?}");
+    assert!(out.contains("Busy"), "stdout={out:?}");
+}
+
+#[test]
+fn enum_public_fields_stay_zero_for_public_count() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "en.rs", "enum Kind { A, B }\n");
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="1"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn coupling_includes_return_type_dependencies() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "cbo.rs",
+        "struct Other;\nstruct Host;\nimpl Host {\n    fn make(&self) -> Other { Other }\n}\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "cbo.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="cbo">
+  <rule ref="design/CouplingBetweenObjects">
+    <properties>
+      <property name="maximum" value="0"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("CouplingBetweenObjects"), "stdout={out:?}");
+    assert!(out.contains("Host"), "stdout={out:?}");
+}
+
+#[test]
 fn ignore_tests_scans_nested_cfg_test_modules() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

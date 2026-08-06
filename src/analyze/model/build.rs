@@ -350,7 +350,7 @@ pub(crate) fn insert_trait<'a>(
                 body,
                 returns_bool: returns_bool(&m.sig.output),
                 dep_types: sig_dep_types(&m.sig),
-                counts_for_type_metrics: true,
+                counts_for_type_metrics: false,
             });
         }
     }
