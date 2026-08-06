@@ -871,8 +871,9 @@ impl Foo {
 
 #[test]
 fn boolean_get_method_name_default_skips_parameterized_without_property() {
-    // Kill default-false → true: XML must omit checkParameterizedMethods so the
-    // Rust default is the only source of the false value.
+    // Kill default-false → true: define the rule inline with no property so the
+    // Rust default is the only source of the false value (a catalog ref would
+    // inherit checkParameterizedMethods=false from naming.xml).
     let dir = TempDir::new().unwrap();
     let path = write_file(
         dir.path(),
@@ -884,9 +885,11 @@ fn boolean_get_method_name_default_skips_parameterized_without_property() {
         &xml,
         r#"<?xml version="1.0" encoding="UTF-8" ?>
 <ruleset name="bg">
-  <rule ref="naming/BooleanGetMethodName">
-    <properties>
-    </properties>
+  <rule name="BooleanGetMethodName"
+          message="The '{0}()' method which returns a boolean should be named 'is_...()' or 'has_...()'"
+          class="PHPMD\Rule\Naming\BooleanGetMethodName"
+          externalInfoUrl="https://phpmd.org/rules/naming.html#booleangetmethodname">
+    <priority>4</priority>
   </rule>
 </ruleset>
 "#,
