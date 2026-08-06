@@ -120,10 +120,11 @@ fn long_class_name_applies_only_first_matching_suffix() {
 fn boolean_get_method_name_treats_exact_get_as_getter() {
     let dir = TempDir::new().unwrap();
     // Length 3 boundary: "get" must match (>= 3), and "ge" must not (>= 2 mutant).
+    // Letter checks: set_* must not match without the leading 'g'; gea_* without the 't'.
     let path = write_file(
         dir.path(),
         "get.rs",
-        "fn get() -> bool { true }\nfn ge() -> bool { true }\nfn getx() -> bool { true }\nfn gat_flag() -> bool { true }\nfn gxt_flag() -> bool { true }\nfn geT_ok() -> bool { true }\n",
+        "fn get() -> bool { true }\nfn ge() -> bool { true }\nfn getx() -> bool { true }\nfn gat_flag() -> bool { true }\nfn gxt_flag() -> bool { true }\nfn geT_ok() -> bool { true }\nfn set_flag() -> bool { true }\nfn gea_flag() -> bool { true }\n",
     );
     let (code, out, err) = run_cli(&[
         path.to_str().unwrap(),
@@ -163,6 +164,14 @@ fn boolean_get_method_name_treats_exact_get_as_getter() {
         !out.contains("gxt_flag"),
         "gxt_flag must not be a getter: stdout={out:?}"
     );
+    assert!(
+        !out.contains("set_flag"),
+        "set_flag must not be a getter: stdout={out:?}"
+    );
+    assert!(
+        !out.contains("gea_flag"),
+        "gea_flag must not be a getter: stdout={out:?}"
+    );
 }
 
 // --- is_upper_case via ConstantNamingConventions ----------------------------
@@ -173,7 +182,7 @@ fn constant_naming_allows_digits_and_rejects_underscore_only() {
     let path = write_file(
         dir.path(),
         "const.rs",
-        "const OK_VALUE_1: i32 = 1;\nconst ___: i32 = 2;\n",
+        "const OK_VALUE_1: i32 = 1;\nconst _OK: i32 = 2;\nconst ___: i32 = 3;\n",
     );
     let (code, out, err) = run_cli(&[
         path.to_str().unwrap(),
@@ -187,10 +196,14 @@ fn constant_naming_allows_digits_and_rejects_underscore_only() {
         !out.contains("OK_VALUE_1"),
         "digits must stay SCREAMING_SNAKE: stdout={out:?}"
     );
+    assert!(
+        !out.contains("_OK"),
+        "leading underscore then letters must stay upper: stdout={out:?}"
+    );
     assert_finding(
         &out,
         &path,
-        2,
+        3,
         "ConstantNamingConventions",
         "Constant ___ should be defined in SCREAMING_SNAKE_CASE",
     );
@@ -201,9 +214,9 @@ fn constant_naming_allows_digits_and_rejects_underscore_only() {
 #[test]
 fn camel_case_method_name_allows_digit_then_letter() {
     let dir = TempDir::new().unwrap();
-    // `2x` after underscore: digit continue must keep scanning so `a` sets saw_letter.
-    // A break-on-digit mutant stops early and reports this name.
-    let path = write_file(dir.path(), "dig.rs", "fn load_2x() {}\nfn BadName() {}\n");
+    // Digit before any letter: continue-on-digit must keep scanning.
+    // A break-on-digit mutant stops with saw_letter=false and reports the name.
+    let path = write_file(dir.path(), "dig.rs", "fn _2x_load() {}\nfn BadName() {}\n");
     let (code, out, err) = run_cli(&[
         path.to_str().unwrap(),
         "text",
@@ -213,7 +226,7 @@ fn camel_case_method_name_allows_digit_then_letter() {
     ]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(
-        !out.contains("load_2x"),
+        !out.contains("_2x_load"),
         "digit-then-letter must stay snake_case: stdout={out:?}"
     );
     assert!(out.contains("BadName"), "stdout={out:?}");
@@ -271,12 +284,12 @@ fn camel_case_class_name_abbreviations_reject_two_char_all_caps() {
 #[test]
 fn boolean_argument_flag_ignorepattern_body_and_flags_must_parse() {
     let dir = TempDir::new().unwrap();
-    // Body starts at index 1; flags start at close+1. Off-by-one drops the leading
-    // `^` or the `i` flag so CreateThing would no longer be ignored.
+    // Body starts at index 1 (`^create`); flags at close+1 (`i`).
+    // Off-by-one on the body drops `^`, so `recreate_*` would be ignored by mistake.
     let path = write_file(
         dir.path(),
         "ign.rs",
-        "fn CreateThing(enabled: bool) {}\nfn other_thing(enabled: bool) {}\n",
+        "fn CreateThing(enabled: bool) {}\nfn recreate_thing(enabled: bool) {}\nfn other_thing(enabled: bool) {}\n",
     );
     let xml = dir.path().join("baf.xml");
     fs::write(
@@ -297,6 +310,10 @@ fn boolean_argument_flag_ignorepattern_body_and_flags_must_parse() {
     assert!(
         !out.contains("CreateThing"),
         "ignorepattern must stay case-insensitive anchored: stdout={out:?}"
+    );
+    assert!(
+        out.contains("recreate_thing"),
+        "anchor must not ignore recreate_*: stdout={out:?}"
     );
     assert!(out.contains("other_thing"), "stdout={out:?}");
 }
