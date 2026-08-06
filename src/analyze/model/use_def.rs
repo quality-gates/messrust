@@ -404,8 +404,7 @@ pub(crate) fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
 
 pub(crate) fn is_binding_name(name: &str) -> bool {
     // Syn never feeds the `self` receiver through PatIdent bindings we record.
-    // Underscore-prefixed names are skipped later by unused-code rules.
-    name.starts_with(|ch: char| ch.is_lowercase())
+    name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
 }
 
 
