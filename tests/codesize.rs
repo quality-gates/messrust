@@ -59,8 +59,8 @@ fn fields_src(kind: &str, name: &str, n: usize) -> String {
     format!("{kind} {name} {{\n{fields}}}\n")
 }
 
-fn methods_src(type_vis: &str, name: &str, method_line: &dyn Fn(usize) -> String, n: usize) -> String {
-    let methods: String = (0..n).map(|i| method_line(i)).collect();
+fn methods_src(type_vis: &str, name: &str, method_line: impl Fn(usize) -> String, n: usize) -> String {
+    let methods: String = (0..n).map(method_line).collect();
     format!("{type_vis}struct {name} {{}}\n\nimpl {name} {{\n{methods}}}\n")
 }
 
@@ -1063,7 +1063,7 @@ fn too_many_methods_quiet_at_twenty_five() {
     let path = write_file(
         dir.path(),
         "busy.rs",
-        &methods_src("", "Busy", &|i| format!("    fn work{i}(&self) {{}}\n"), 25),
+        &methods_src("", "Busy", |i| format!("    fn work{i}(&self) {{}}\n"), 25),
     );
     let (code, out, err) = run_only(&path, "TooManyMethods");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
@@ -1075,7 +1075,7 @@ fn too_many_methods_fires_at_twenty_six_with_exact_message() {
     let path = write_file(
         dir.path(),
         "busy.rs",
-        &methods_src("", "Busy", &|i| format!("    fn work{i}(&self) {{}}\n"), 26),
+        &methods_src("", "Busy", |i| format!("    fn work{i}(&self) {{}}\n"), 26),
     );
     let (code, out, err) = run_only(&path, "TooManyMethods");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
@@ -1094,7 +1094,7 @@ fn too_many_public_methods_quiet_at_ten() {
     let path = write_file(
         dir.path(),
         "api.rs",
-        &methods_src("pub ", "Api", &|i| format!("    pub fn work{i}(&self) {{}}\n"), 10),
+        &methods_src("pub ", "Api", |i| format!("    pub fn work{i}(&self) {{}}\n"), 10),
     );
     let (code, out, err) = run_only(&path, "TooManyPublicMethods");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
@@ -1106,7 +1106,7 @@ fn too_many_public_methods_fires_at_eleven_with_exact_message() {
     let path = write_file(
         dir.path(),
         "api.rs",
-        &methods_src("pub ", "Api", &|i| format!("    pub fn work{i}(&self) {{}}\n"), 11),
+        &methods_src("pub ", "Api", |i| format!("    pub fn work{i}(&self) {{}}\n"), 11),
     );
     let (code, out, err) = run_only(&path, "TooManyPublicMethods");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
