@@ -1066,3 +1066,180 @@ fn short_variable_inside_while_condition_is_recorded() {
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("like v."), "stdout={out:?}");
 }
+
+#[test]
+fn while_let_scrutinee_locals_are_recorded() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while_scrut.rs",
+        "fn work() {\n    while let Some(item) = {\n        let v = Some(1);\n        v\n    } {\n        let _ = item;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "naming",
+        "--only",
+        "ShortVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("like v."), "stdout={out:?}");
+}
+
+#[test]
+fn upsert_type_end_line_feeds_class_length() {
+    let dir = TempDir::new().unwrap();
+    // Impl first, then a multi-line struct so end_line must update from the struct span.
+    let path = write_file(
+        dir.path(),
+        "upsert_ecl.rs",
+        "impl Bag { fn touch() {} }\nstruct Bag {\n    a: i32,\n}\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "ecl.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl">
+  <rule name="ExcessiveClassLength"
+        message="The class {0} has {1} lines of code. Current threshold is {2}. Avoid really long classes."
+        class="PHPMD\Rule\Design\LongClass">
+    <priority>3</priority>
+    <properties>
+      <property name="minimum" value="3"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // struct lines 2-4 = 3, plus touch method 1 line => 4
+    assert!(out.contains("has 4 lines of code"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_from_tuple_destructuring_assignment() {
+    let dir = TempDir::new().unwrap();
+    // (a, b) = (1, 2) should not count a/b as reads; unread locals stay unused.
+    let path = write_file(
+        dir.path(),
+        "tuple_as.rs",
+        "fn work() {\n    let mut a = 0;\n    let mut b = 0;\n    (a, b) = (1, 2);\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("a") || out.contains("b"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_index_base_is_a_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "idx.rs",
+        "fn work(mut items: [i32; 1]) {\n    let i = 0;\n    items[i] = 1;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_counts_macro_dot_field() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mac_field.rs",
+        "struct Host { used_field: i32, dead_field: i32 }\nfn show(h: &Host) {\n    println!(\"{}\", h.used_field);\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead_field"), "stdout={out:?}");
+    assert!(!out.contains("used_field"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_skips_serialize_derive() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "ser.rs",
+        "#[derive(Serialize)]\nstruct Host { only_field: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_skips_deserialize_derive() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "de3.rs",
+        "#[derive(Deserialize)]\nstruct Host { only_field: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_not_misclassified_as_parameter_after_bindings() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mode.rs",
+        "fn work(used: i32) {\n    let dead = 1;\n    let _ = used;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as 'dead'.",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
