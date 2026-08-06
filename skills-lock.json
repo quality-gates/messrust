@@ -145,6 +145,30 @@
       "skillPath": "skills/engineering/resolving-merge-conflicts/SKILL.md",
       "computedHash": "6a005119c18c477c2122321a380a43d40242bae3cc7027125f13497d90875be2"
     },
+    "resume-from-claude": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/resume-from-claude/SKILL.md",
+      "computedHash": "e6b4d748b72643cf2ec034d5997cf49eb810aeb0969a90a7f86f266285ae7e51"
+    },
+    "resume-from-codex": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/resume-from-codex/SKILL.md",
+      "computedHash": "127be95d2b143738d1c0bd390a2738a23cc8d69ee3f2ddf1d48c39a7490021f5"
+    },
+    "resume-from-opencode": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/resume-from-opencode/SKILL.md",
+      "computedHash": "1359a88e429b6b6c7e2b80bb26fa135707bc0663ff9c78d80b461eaba630d24f"
+    },
+    "resume-from-pi": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/resume-from-pi/SKILL.md",
+      "computedHash": "5281f5f5b4e1906e710e2e0df76628894693dc68cb6ae4982b2c0f251de4baf9"
+    },
     "scaffold-exercises": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -169,6 +193,18 @@
       "skillPath": "skills/in-progress/setup-ts-deep-modules/SKILL.md",
       "computedHash": "6dbd0830059a887ca6206dfa8c24baf7e28be7321471d2b899887fff9b77e34f"
     },
+    "ship-pr": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/ship-pr/SKILL.md",
+      "computedHash": "dcd515e77d39ad1f6aeb9e220552a3cffd4cda023efd7e5c9755663b57566217"
+    },
+    "ship-spec": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/ship-spec/SKILL.md",
+      "computedHash": "87bc2a178b279ebdb747ed35b38585f1924b805e7d9cab4b6bfcfd110bbd733d"
+    },
     "tdd": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -192,6 +228,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/to-spec/SKILL.md",
       "computedHash": "4049d9955a79642ca945e844362d889060787167719bcca0b0cd6f53a95dc9e0"
+    },
+    "to-summary": {
+      "source": "jonbaldie/skills",
+      "sourceType": "github",
+      "skillPath": "skills/to-summary/SKILL.md",
+      "computedHash": "0f493d65800c60223a73ce028cd7c5e04fcc7fd250d38b47cd6dad46dd272c5d"
     },
     "to-tickets": {
       "source": "mattpocock/skills",
