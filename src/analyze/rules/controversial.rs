@@ -43,7 +43,7 @@ pub(crate) fn apply_camel_case_method_name(
     out: &mut Vec<Violation>,
 ) {
     for f in &model.functions {
-        if f.name == "_" || is_snake_case(&f.name) {
+        if is_snake_case(&f.name) {
             continue;
         }
         out.push(func_violation(
@@ -85,7 +85,7 @@ pub(crate) fn apply_camel_case_parameter_name(
     out: &mut Vec<Violation>,
 ) {
     for p in &model.usage.params {
-        if p.name == "_" || is_snake_case(&p.name) {
+        if is_snake_case(&p.name) {
             continue;
         }
         out.push(name_violation(
@@ -105,7 +105,7 @@ pub(crate) fn apply_camel_case_variable_name(
     out: &mut Vec<Violation>,
 ) {
     for v in &model.usage.locals {
-        if v.name == "_" || is_snake_case(&v.name) {
+        if is_snake_case(&v.name) {
             continue;
         }
         out.push(name_violation(
