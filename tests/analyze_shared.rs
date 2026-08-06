@@ -1462,3 +1462,211 @@ fn unused_local_format_nested_group_capture() {
     ]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
+
+#[test]
+fn unused_private_field_macro_resets_after_dot_before_next_ident() {
+    let dir = TempDir::new().unwrap();
+    // stringify!(h.live dead) — after `live`, after_dot must clear so `dead` is not a field read.
+    let path = write_file(
+        dir.path(),
+        "mac_stringify.rs",
+        "struct Host { live: i32, dead: i32 }\nfn show(h: &Host) {\n    let _ = stringify!(h.live dead);\n    let _ = h;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+    assert!(!out.contains("'live'"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_macro_resets_after_group() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mac_group.rs",
+        "struct Host { live: i32, dead: i32 }\nfn show(h: &Host) {\n    let _ = stringify!((h.live) dead);\n    let _ = h;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_index_expr_base_is_a_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "idx_base.rs",
+        "fn work() {\n    let mut items = [0];\n    let i = 0;\n    items[i] = 1;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_formal_parameter_on_inherent_impl_method() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "impl_param.rs",
+        "struct Host;\nimpl Host {\n    fn work(&self, unused_arg: i32) {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("unused_arg"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_formal_parameter_on_trait_default_method() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_param.rs",
+        "trait Host {\n    fn work(&self, unused_arg: i32) {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("unused_arg"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_method_after_trait_impl_restores_flag() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_then_inherent.rs",
+        "trait Touch { fn touch(&self); }\nstruct Host;\nimpl Touch for Host {\n    fn touch(&self) {}\n}\nimpl Host {\n    fn dead_method(&self) {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateMethod",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead_method"), "stdout={out:?}");
+}
+
+#[test]
+fn match_guard_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "guard.rs",
+        "fn work(flag: bool) {\n    let guard = true;\n    match flag {\n        true if guard => {}\n        _ => {}\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn if_let_else_branch_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "if_else.rs",
+        "fn work(value: Option<i32>) {\n    let fallback = 1;\n    if let Some(x) = value {\n        let _ = x;\n    } else {\n        let _ = fallback;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn self_path_is_not_counted_as_ident_read_for_unused_local() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "self_read.rs",
+        "struct Host { value: i32 }\nimpl Host {\n    fn work(&self) {\n        let dead = 1;\n        let _ = self.value;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_macro_literal_resets_after_dot() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mac_lit.rs",
+        "struct Host { dead: i32 }\nfn show(h: &Host) {\n    let _ = stringify!(h . \"lit\" dead);\n    let _ = h;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_format_capture_inside_token_group() {
+    let dir = TempDir::new().unwrap();
+    // Group-wrapped format string must still yield the capture name.
+    let path = write_file(
+        dir.path(),
+        "fmt_grp_lit.rs",
+        "fn work() {\n    let name = 1;\n    panic!((\"{name}\"));\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}

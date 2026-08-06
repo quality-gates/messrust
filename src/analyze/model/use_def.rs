@@ -107,9 +107,6 @@ pub(crate) fn visit_assignment_place(collector: &mut UseDefCollector, target: &s
 
 impl<'ast> Visit<'ast> for UseDefCollector {
     fn visit_local(&mut self, node: &'ast syn::Local) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         with_binding_mode(self, BindingMode::Local, |visitor| {
             visitor.visit_pat(&node.pat)
         });
@@ -185,9 +182,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_arm(&mut self, node: &'ast syn::Arm) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         with_binding_mode(self, BindingMode::Local, |visitor| {
             visitor.visit_pat(&node.pat)
         });
@@ -198,9 +192,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         with_binding_mode(self, BindingMode::Local, |visitor| {
             visitor.visit_pat(&node.pat)
         });
@@ -209,9 +200,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         if let syn::Expr::Let(l) = &*node.cond {
             with_binding_mode(self, BindingMode::Local, |visitor| {
                 visitor.visit_pat(&l.pat)
@@ -224,9 +212,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
-        for attr in &node.attrs {
-            self.visit_attribute(attr);
-        }
         if let syn::Expr::Let(l) = &*node.cond {
             with_binding_mode(self, BindingMode::Local, |visitor| {
                 visitor.visit_pat(&l.pat)
