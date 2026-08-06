@@ -337,7 +337,6 @@ pub(crate) fn insert_trait<'a>(
             existing.node_type = "trait".to_string();
             existing.begin_line = t.trait_token.span().start().line;
             existing.end_line = t.span().end().line;
-            existing.field_count = 0;
             existing.public_fields = 0;
             existing.methods.append(&mut methods);
         })

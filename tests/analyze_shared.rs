@@ -647,6 +647,153 @@ fn trait_methods_count_for_too_many_methods() {
 }
 
 #[test]
+fn trait_after_impl_appends_methods_and_uses_trait_span() {
+    let dir = TempDir::new().unwrap();
+    // Impl inserts the type first so insert_trait takes the and_modify path.
+    let methods: String = (0..25).map(|i| format!("    fn m{i}(&self);\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "tr_after_impl.rs",
+        &format!("impl Busy {{ fn touch(&self) {{}} }}\npub trait Busy {{\n{methods}}}\n"),
+    );
+    let xml = write_file(
+        dir.path(),
+        "tmm.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="tmm">
+  <rule ref="codesize/TooManyMethods">
+    <properties>
+      <property name="maxmethods" value="25"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // 1 impl method + 25 trait methods = 26; location must be the trait line (2).
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "TooManyMethods",
+        "The trait Busy has 26 non-getter- and setter-methods. Consider refactoring Busy to keep number of methods under 25.",
+    );
+}
+
+#[test]
+fn trait_after_struct_clears_fields_for_too_many_fields() {
+    let dir = TempDir::new().unwrap();
+    // Struct seeds field_count; trait and_modify changes node_type so TooManyFields skips.
+    let fields: String = (0..20).map(|i| format!("    f{i}: i32,\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "tr_after_struct.rs",
+        &format!("struct Host {{\n{fields}}}\ntrait Host {{ fn touch(&self); }}\n"),
+    );
+    let xml = write_file(
+        dir.path(),
+        "tmf.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="tmf">
+  <rule ref="codesize/TooManyFields">
+    <properties>
+      <property name="maxfields" value="15"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(
+        code, EXIT_SUCCESS,
+        "trait node_type must skip TooManyFields: stderr={err:?} stdout={out:?}"
+    );
+}
+
+#[test]
+fn trait_after_struct_clears_public_fields_for_public_count() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "tr_clear_pub.rs",
+        "struct Host { pub a: i32, pub b: i32 }\npub trait Host { fn only(&self); }\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    // 1 public trait method + cleared public_fields = 1 < 2.
+    assert_eq!(
+        code, EXIT_SUCCESS,
+        "public_fields must clear on trait: stderr={err:?} stdout={out:?}"
+    );
+}
+
+#[test]
+fn trait_after_impl_updates_end_line_for_class_length() {
+    let dir = TempDir::new().unwrap();
+    // No method bodies so type_loc is only the trait span (begin..=end).
+    let path = write_file(
+        dir.path(),
+        "tr_end.rs",
+        "impl Host { fn touch(&self) {} }\ntrait Host {\n    fn a(&self);\n    fn b(&self);\n    fn c(&self);\n    fn d(&self);\n}\n",
+    );
+    let xml = write_file(
+        dir.path(),
+        "ecl.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl">
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="4"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // Span + per-method lines; end_line must come from the trait, not the impl.
+    assert!(out.contains("has 11 lines of code"), "stdout={out:?}");
+    assert_finding(&out, &path, 2, "ExcessiveClassLength", "Host");
+}
+
+#[test]
+fn empty_trait_public_fields_stay_zero() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "empty_trait.rs", "pub trait Empty {}\n");
+    let xml = write_file(
+        dir.path(),
+        "epc.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="epc">
+  <rule ref="codesize/ExcessivePublicCount">
+    <properties>
+      <property name="minimum" value="1"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(
+        code, EXIT_SUCCESS,
+        "empty trait must stay quiet: stderr={err:?} stdout={out:?}"
+    );
+}
+
+#[test]
 fn enum_public_fields_stay_zero_for_public_count() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "en.rs", "enum Kind { A, B }\n");
