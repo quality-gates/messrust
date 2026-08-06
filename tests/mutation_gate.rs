@@ -54,31 +54,31 @@ fn job_body(workflow: &str, job_name: &str) -> String {
     after[..end].to_string()
 }
 
-fn assert_thresholds_in(text: &str, where_: &str) {
+fn assert_thresholds_in(text: &str, label: &str) {
     assert!(
         text.contains(&format!("--min-msi {MIN_MSI}"))
             || text.contains(&format!("min_msi: {MIN_MSI}")),
-        "{where_} must hold min MSI {MIN_MSI}"
+        "{label} must hold min MSI {MIN_MSI}"
     );
     assert!(
         text.contains(&format!("--min-covered-msi {MIN_COVERED_MSI}"))
             || text.contains(&format!("min_covered_msi: {MIN_COVERED_MSI}")),
-        "{where_} must hold covered MSI {MIN_COVERED_MSI}"
+        "{label} must hold covered MSI {MIN_COVERED_MSI}"
     );
 }
 
-fn assert_cli_thresholds(text: &str, where_: &str) {
+fn assert_cli_thresholds(text: &str, label: &str) {
     assert!(
         text.contains(&format!("--min-msi {MIN_MSI}")),
-        "{where_} must hold --min-msi {MIN_MSI}"
+        "{label} must hold --min-msi {MIN_MSI}"
     );
     assert!(
         text.contains(&format!("--min-covered-msi {MIN_COVERED_MSI}")),
-        "{where_} must hold --min-covered-msi {MIN_COVERED_MSI}"
+        "{label} must hold --min-covered-msi {MIN_COVERED_MSI}"
     );
 }
 
-fn assert_no_forbidden_shared(text: &str, where_: &str) {
+fn assert_no_forbidden_shared(text: &str, label: &str) {
     let forbidden = [
         "continue-on-error",
         "|| true",
@@ -94,7 +94,7 @@ fn assert_no_forbidden_shared(text: &str, where_: &str) {
     for token in forbidden {
         assert!(
             !text.contains(token),
-            "{where_} must not hold forbidden token `{token}`"
+            "{label} must not hold forbidden token `{token}`"
         );
     }
     // `--exec` is forbidden; `--exec-timeout` is allowed. Match a bare `--exec`
@@ -104,14 +104,14 @@ fn assert_no_forbidden_shared(text: &str, where_: &str) {
         let rest = &search[idx + "--exec".len()..];
         assert!(
             rest.starts_with("-timeout"),
-            "{where_} must not hold bare `--exec` (found near `...{}`)",
+            "{label} must not hold bare `--exec` (found near `...{}`)",
             &search[idx..].chars().take(24).collect::<String>()
         );
         search = rest;
     }
 }
 
-fn assert_no_named_source_files(text: &str, where_: &str) {
+fn assert_no_named_source_files(text: &str, label: &str) {
     // Gate target must be the crate root (`.`), never a stale file list.
     for name in [
         "src/analyze.rs",
@@ -125,7 +125,7 @@ fn assert_no_named_source_files(text: &str, where_: &str) {
     ] {
         assert!(
             !text.contains(name),
-            "{where_} must not name individual source file `{name}`"
+            "{label} must not name individual source file `{name}`"
         );
     }
 }
@@ -205,8 +205,8 @@ fn pull_request_path_is_diff_aware_at_full_thresholds() {
         "PR path must use --git-diff-lines"
     );
     assert!(
-        pr.contains("--git-diff-base"),
-        "PR path must use --git-diff-base"
+        pr.contains("--git-diff-base origin/main"),
+        "PR path must set --git-diff-base to the default branch (origin/main)"
     );
     assert!(
         pr.contains("--ignore-msi-with-no-mutations"),

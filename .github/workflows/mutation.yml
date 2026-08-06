@@ -34,7 +34,8 @@ jobs:
       - name: Run diff-aware mutation testing
         # Per-mutant suite skips pack_install_smoke so each mutant does not run
         # cargo install. That exclusion lowers the measured score and never
-        # raises it.
+        # raises it. Cap workers at 1 so the GitHub-hosted runner stays within
+        # RAM. Speed options only; they do not change the score.
         env:
           CARGO_BUILD_JOBS: "2"
         run: |
@@ -70,7 +71,8 @@ jobs:
       - name: Run full-crate mutation testing
         # Per-mutant suite skips pack_install_smoke so each mutant does not run
         # cargo install. That exclusion lowers the measured score and never
-        # raises it.
+        # raises it. Cap workers at 1 so the GitHub-hosted runner stays within
+        # RAM. Speed options only; they do not change the score.
         env:
           CARGO_BUILD_JOBS: "2"
         run: |
