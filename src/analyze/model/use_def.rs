@@ -99,7 +99,6 @@ pub(crate) fn visit_assignment_place(collector: &mut UseDefCollector, target: &s
             collector.visit_expr(&index.index);
         }
         syn::Expr::Paren(paren) => visit_assignment_target(collector, &paren.expr),
-        syn::Expr::Group(group) => visit_assignment_target(collector, &group.expr),
         _ => collector.visit_expr(target),
     }
 }
@@ -131,24 +130,18 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
-        let previous = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_struct(self, node);
-        self.derived_fields_are_used = previous;
     }
 
     fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
-        let previous = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_enum(self, node);
-        self.derived_fields_are_used = previous;
     }
 
     fn visit_item_union(&mut self, node: &'ast ItemUnion) {
-        let previous = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_union(self, node);
-        self.derived_fields_are_used = previous;
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
@@ -178,7 +171,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
                 });
             }
         }
-        syn::visit::visit_field(self, node);
     }
 
     fn visit_arm(&mut self, node: &'ast syn::Arm) {
@@ -253,13 +245,10 @@ impl<'ast> Visit<'ast> for UseDefCollector {
 
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
         if let Some(ident) = path_single_ident(node) {
-            if ident != "self" && ident != "Self" {
-                self.model.ident_reads.insert(ident);
-            }
+            self.model.ident_reads.insert(ident);
         } else if let Some(ident) = path_last_ident(node) {
             self.model.method_calls.insert(ident);
         }
-        syn::visit::visit_expr_path(self, node);
     }
 
     fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
@@ -288,7 +277,6 @@ impl<'ast> Visit<'ast> for UseDefCollector {
         if is_format_macro(node) {
             collect_format_captures(node.tokens.clone(), &mut self.model.ident_reads);
         }
-        syn::visit::visit_macro(self, node);
     }
 }
 

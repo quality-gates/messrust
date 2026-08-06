@@ -1670,3 +1670,429 @@ fn unused_local_format_capture_inside_token_group() {
     ]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
+
+#[test]
+fn unused_local_array_field_assign_counts_bases_as_reads() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "array_field_as.rs",
+        "struct Pair { a: i32, b: i32 }\nfn work() {\n    let mut left = Pair { a: 0, b: 0 };\n    let mut right = Pair { a: 0, b: 0 };\n    [left.a, right.b] = [1, 2];\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_struct_field_assign_counts_bases_as_reads() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "struct_field_as.rs",
+        "struct Point { x: i32, y: i32 }\nstruct Host { inner: i32 }\nfn work() {\n    let mut left = Host { inner: 0 };\n    let mut right = Host { inner: 0 };\n    let src = Point { x: 1, y: 2 };\n    Point { x: left.inner, y: right.inner } = src;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_paren_field_assign_counts_base_as_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "paren_field_as.rs",
+        "struct Wrapper { inner: i32 }\nfn work() {\n    let mut host = Wrapper { inner: 0 };\n    (host.inner) = 1;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn if_let_unused_binder_is_reported() {
+    let dir = TempDir::new().unwrap();
+    // Binder must be recorded; dropping visit_pat on if-let would hide it.
+    let path = write_file(
+        dir.path(),
+        "if_let_unused.rs",
+        "fn work(value: Option<i32>) {\n    if let Some(x) = value {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("x"), "stdout={out:?}");
+}
+
+#[test]
+fn if_let_scrutinee_counts_as_param_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "if_let_scrut.rs",
+        "fn work(value: Option<i32>) {\n    if let Some(x) = value {\n        let _ = x;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn plain_if_condition_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "plain_if.rs",
+        "fn work() {\n    let flag = true;\n    if flag {\n        let _ = 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn while_let_unused_binder_is_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while_let_unused.rs",
+        "fn work(mut items: impl Iterator<Item = i32>) {\n    while let Some(x) = items.next() {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("x"), "stdout={out:?}");
+}
+
+#[test]
+fn while_let_scrutinee_counts_as_param_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while_let_scrut.rs",
+        "fn work(value: Option<i32>) {\n    while let Some(x) = value {\n        let _ = x;\n        break;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn while_body_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "while_body.rs",
+        "fn work() {\n    let body = 1;\n    while false {\n        let _ = body;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn plain_while_condition_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "plain_while.rs",
+        "fn work() {\n    let flag = false;\n    while flag {\n        let _ = 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn if_then_branch_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "if_then.rs",
+        "fn work() {\n    let then_val = 1;\n    if true {\n        let _ = then_val;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn for_loop_unused_binder_is_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "for_unused.rs",
+        "fn work() {\n    for x in 0..1 {}\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("x"), "stdout={out:?}");
+}
+
+#[test]
+fn for_loop_iterable_param_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "for_iter.rs",
+        "fn work(items: [i32; 1]) {\n    for x in items {\n        let _ = x;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedFormalParameter",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn for_loop_body_local_read_counts() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "for_body.rs",
+        "fn work() {\n    let body = 1;\n    for _ in 0..0 {\n        let _ = body;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn match_arm_unused_binder_is_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "match_unused.rs",
+        "fn work(value: Option<i32>) {\n    match value {\n        Some(x) => {}\n        None => {}\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("x"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_on_union_without_derive() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "union_dead.rs",
+        "union Host { dead: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_skips_serialize_on_union() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "union_ser.rs",
+        "#[derive(Serialize)]\nunion Host { only_field: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_on_enum_variant_without_derive() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "enum_dead.rs",
+        "enum Host { Point { dead: i32 } }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_skips_serialize_on_enum() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "enum_ser.rs",
+        "#[derive(Serialize)]\nenum Host { Point { only_field: i32 } }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn derive_flag_restores_after_serialize_before_union() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "derive_restore_union.rs",
+        "#[derive(Serialize)]\nstruct Outer { live: i32 }\nunion Host { dead: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+    assert!(!out.contains("live"), "stdout={out:?}");
+}
+
+#[test]
+fn derive_flag_restores_after_serialize_union_before_struct() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "derive_restore_after_union.rs",
+        "#[derive(Serialize)]\nunion Outer { live: i32 }\nstruct Host { dead: i32 }\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+    assert!(!out.contains("live"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_in_trait_default_method_body() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_default_local.rs",
+        "trait Host {\n    fn work(&self) {\n        let dead = 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_deref_assign_counts_pointer_as_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "deref_as.rs",
+        "fn work() {\n    let mut value = 0;\n    let ptr = &mut value;\n    *ptr = 1;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
