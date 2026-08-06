@@ -257,7 +257,6 @@ fn expr_is_empty_block(expr: &syn::Expr) -> bool {
 fn pat_is_err(pat: &Pat) -> bool {
     match pat {
         Pat::TupleStruct(ts) => ts.path.segments.last().is_some_and(|s| s.ident == "Err"),
-        Pat::Ident(id) => id.ident == "Err",
         Pat::Or(p) => p.cases.iter().any(pat_is_err),
         _ => false,
     }
@@ -321,7 +320,7 @@ pub(crate) fn lcom4(t: &TypeModel<'_>) -> usize {
         .enumerate()
         .map(|(i, m)| (m.name.clone(), i))
         .collect();
-    let accessor_of = accessor_fields(t, &field_names);
+    let accessor_of = accessor_fields(t);
     let mut graph = CohesionGraph::new(t.methods.len());
 
     for (i, m) in t.methods.iter().enumerate() {
@@ -345,13 +344,10 @@ pub(crate) fn lcom4(t: &TypeModel<'_>) -> usize {
 }
 
 
-fn accessor_fields(
-    model: &TypeModel<'_>,
-    field_names: &HashSet<String>,
-) -> HashMap<String, String> {
+fn accessor_fields(model: &TypeModel<'_>) -> HashMap<String, String> {
     let mut accessors = HashMap::new();
     for method in &model.methods {
-        if let Some(field) = accessor_field(method, field_names) {
+        if let Some(field) = accessor_field(method) {
             accessors.insert(method.name.clone(), field);
         }
     }
@@ -437,36 +433,33 @@ impl CohesionGraph {
 }
 
 
-fn accessor_field(m: &MethodRef<'_>, fields: &HashSet<String>) -> Option<String> {
+fn accessor_field(m: &MethodRef<'_>) -> Option<String> {
     let body = m.body?;
     if body.stmts.len() != 1 {
         return None;
     }
     match &body.stmts[0] {
-        syn::Stmt::Expr(syn::Expr::Field(field), _) => receiver_field(field, fields),
-        syn::Stmt::Expr(syn::Expr::Assign(assign), _) => assigned_receiver_field(assign, fields),
+        syn::Stmt::Expr(syn::Expr::Field(field), _) => receiver_field(field),
+        syn::Stmt::Expr(syn::Expr::Assign(assign), _) => assigned_receiver_field(assign),
         _ => None,
     }
 }
 
 
-fn assigned_receiver_field(
-    assignment: &syn::ExprAssign,
-    fields: &HashSet<String>,
-) -> Option<String> {
+fn assigned_receiver_field(assignment: &syn::ExprAssign) -> Option<String> {
     let syn::Expr::Field(field) = &*assignment.left else {
         return None;
     };
-    receiver_field(field, fields)
+    receiver_field(field)
 }
 
 
-fn receiver_field(field: &syn::ExprField, fields: &HashSet<String>) -> Option<String> {
+fn receiver_field(field: &syn::ExprField) -> Option<String> {
     let (syn::Expr::Path(base), Member::Named(identifier)) = (&*field.base, &field.member) else {
         return None;
     };
     let name = identifier.to_string();
-    (path_is_self(base) && fields.contains(&name)).then_some(name)
+    path_is_self(base).then_some(name)
 }
 
 
@@ -489,10 +482,6 @@ fn receiver_uses(
         called: &mut called,
     };
     visitor.visit_block(body);
-    used_fields.sort();
-    used_fields.dedup();
-    called.sort();
-    called.dedup();
     (used_fields, called)
 }
 
