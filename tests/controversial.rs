@@ -189,6 +189,24 @@ fn camel_case_class_name_rejects_pascal_case_with_underscore() {
 }
 
 #[test]
+fn camel_case_class_name_default_allows_consecutive_caps() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "http.rs", "struct HTTPClient;\n");
+    let (code, out, err) = run_only(&path, "CamelCaseClassName");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn camel_case_class_name_reports_bad_type_after_good_type() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "order.rs", "struct GoodName;\nstruct bad_name;\n");
+    let (code, out, err) = run_only(&path, "CamelCaseClassName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("bad_name"), "stdout={out:?}");
+    assert!(!out.contains("GoodName"), "stdout={out:?}");
+}
+
+#[test]
 fn camel_case_class_name_abbreviations_allow_single_capital_word() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "abbr_ok.rs", "struct HttpClient;\n");
@@ -229,6 +247,16 @@ fn camel_case_method_name_rejects_mixed_case_with_underscore() {
 }
 
 #[test]
+fn camel_case_method_name_reports_bad_fn_after_good_fn() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "order.rs", "fn good_name() {}\nfn BadName() {}\n");
+    let (code, out, err) = run_only(&path, "CamelCaseMethodName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("BadName"), "stdout={out:?}");
+    assert!(!out.contains("good_name"), "stdout={out:?}");
+}
+
+#[test]
 fn camel_case_property_name_skips_tuple_field_name() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "tuple.rs", "struct Point(i32, i32);\n");
@@ -242,6 +270,20 @@ fn camel_case_property_name_skips_blank_ident() {
     let path = write_file(dir.path(), "blank_field.rs", "struct S { _: i32 }\n");
     let (code, out, err) = run_only(&path, "CamelCasePropertyName");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn camel_case_property_name_reports_bad_field_after_good_field() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "order.rs",
+        "struct S { good_field: i32, badField: i32 }\n",
+    );
+    let (code, out, err) = run_only(&path, "CamelCasePropertyName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("badField"), "stdout={out:?}");
+    assert!(!out.contains("good_field"), "stdout={out:?}");
 }
 
 #[test]
@@ -259,6 +301,20 @@ fn camel_case_parameter_name_reports_underscore_digit_name() {
     let (code, out, err) = run_only(&path, "CamelCaseParameterName");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("_1"), "stdout={out:?}");
+}
+
+#[test]
+fn camel_case_parameter_name_reports_bad_param_after_good_param() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "order.rs",
+        "fn work(good_name: i32, badName: i32) { let _ = (good_name, badName); }\n",
+    );
+    let (code, out, err) = run_only(&path, "CamelCaseParameterName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("badName"), "stdout={out:?}");
+    assert!(!out.contains("good_name"), "stdout={out:?}");
 }
 
 #[test]
@@ -281,6 +337,20 @@ fn camel_case_variable_name_rejects_mixed_case_with_underscore() {
     let (code, out, err) = run_only(&path, "CamelCaseVariableName");
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("user_Id"), "stdout={out:?}");
+}
+
+#[test]
+fn camel_case_variable_name_reports_bad_local_after_good_local() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "order.rs",
+        "fn work() {\n    let good_name = 1;\n    let badName = 2;\n    let _ = (good_name, badName);\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "CamelCaseVariableName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("badName"), "stdout={out:?}");
+    assert!(!out.contains("good_name"), "stdout={out:?}");
 }
 
 #[test]
