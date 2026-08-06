@@ -1,5 +1,7 @@
 # messrust
 
+[![Mutation](https://github.com/quality-gates/messrust/actions/workflows/mutation.yml/badge.svg)](https://github.com/quality-gates/messrust/actions/workflows/mutation.yml)
+
 `messrust` is a syntax-only static analyser for Rust. It uses a PHPMD-style
 rule catalogue, ruleset XML, report formats, and exit codes. It does not build,
 run, or execute the code that it checks.
@@ -171,11 +173,16 @@ rustup component add llvm-tools-preview
 The committed policy file is `mutarust.yml`. It sets `min_msi: 75` and
 `min_covered_msi: 80`. These thresholds do not move down.
 
+CI runs the gate in two modes. On a pull request, the workflow mutates only the
+changed production lines. On a push to `main`, it mutates all production source.
+A green pull-request job does not prove the whole-crate score. Only the job on
+`main` measures that number.
+
 The selected target is `.`. `mutarust --list-files .` lists every production
 source file under `src`.
 
-Measure the whole crate with the same thresholds as the future CI gate. Skip
-the packaging smoke test so each mutant does not run `cargo install`. Use
+Measure the whole crate with the same thresholds as the CI gate. Skip the
+packaging smoke test so each mutant does not run `cargo install`. Use
 `--workers 1` on machines with 16 GB RAM or less — the default worker count
 matches the CPU count, and each worker runs a full `cargo test` compilation.
 Without the cap, peak memory can exceed physical RAM and freeze the system:
