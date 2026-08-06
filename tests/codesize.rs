@@ -1,4 +1,8 @@
 //! codesize rules through the injectable CLI entry.
+//!
+//! Seam: `messrust::run`. Each rule test asserts the exit code and the
+//! user-visible text. Threshold cases cover the finding at the boundary, no
+//! finding on the quiet side of the boundary, and the exact message text.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,6 +39,29 @@ fn run_only(path: &Path, rule: &str) -> (i32, String, String) {
         "--only",
         rule,
     ])
+}
+
+fn assert_finding(out: &str, path: &Path, line: usize, rule: &str, message: &str) {
+    let loc = format!("{}:{line}", path.display());
+    assert!(
+        out.contains(&loc),
+        "missing location {loc} in stdout={out:?}"
+    );
+    assert!(out.contains(rule), "missing rule {rule} in stdout={out:?}");
+    assert!(
+        out.contains(message),
+        "missing message {message:?} in stdout={out:?}"
+    );
+}
+
+fn fields_src(kind: &str, name: &str, n: usize) -> String {
+    let fields: String = (0..n).map(|i| format!("    f{i}: i32,\n")).collect();
+    format!("{kind} {name} {{\n{fields}}}\n")
+}
+
+fn methods_src(type_vis: &str, name: &str, method_line: impl Fn(usize) -> String, n: usize) -> String {
+    let methods: String = (0..n).map(method_line).collect();
+    format!("{type_vis}struct {name} {{}}\n\nimpl {name} {{\n{methods}}}\n")
 }
 
 /// Line-for-line Rust translation of the phpmd 2.15.0 / messgo reference
@@ -658,4 +685,540 @@ fn effective_lines_of_code_skips_a_multiline_block_comment() {
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     // 5 raw lines minus the fully-commented middle line = 4 effective lines.
     assert!(out.contains("has 4 lines of code"), "stdout={out:?}");
+}
+
+// ----- Threshold boundaries and exact messages (mutation gate) ------------
+
+fn params_src(name: &str, n: usize) -> String {
+    let params: String = (0..n)
+        .map(|i| format!("p{i}: i32"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("fn {name}({params}) {{}}\n")
+}
+
+fn eml_raw_xml(dir: &Path, name: &str, minimum: u32) -> PathBuf {
+    // Inline rule with no ignore-whitespace property so the default false is used.
+    write_file(
+        dir,
+        name,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="eml">
+  <rule name="ExcessiveMethodLength"
+        message="The {{0}} {{1}}() has {{2}} lines of code. Current threshold is set to {{3}}. Avoid really long methods."
+        class="PHPMD\Rule\Design\LongMethod">
+    <priority>3</priority>
+    <properties>
+      <property name="minimum" value="{minimum}"/>
+    </properties>
+  </rule>
+</ruleset>
+"#
+        ),
+    )
+}
+
+fn ecl_raw_xml(dir: &Path, name: &str, minimum: u32) -> PathBuf {
+    write_file(
+        dir,
+        name,
+        &format!(
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl">
+  <rule name="ExcessiveClassLength"
+        message="The class {{0}} has {{1}} lines of code. Current threshold is {{2}}. Avoid really long classes."
+        class="PHPMD\Rule\Design\LongClass">
+    <priority>3</priority>
+    <properties>
+      <property name="minimum" value="{minimum}"/>
+    </properties>
+  </rule>
+</ruleset>
+"#
+        ),
+    )
+}
+
+#[test]
+fn cyclomatic_complexity_fires_at_threshold_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    // base 1 + nine `if`s = CCN 10, the default reportLevel.
+    let ifs: String = (0..9).map(|i| format!("    if a[{i}] {{}}\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "cc.rs",
+        &format!("fn border(a: [bool; 9]) {{\n{ifs}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "CyclomaticComplexity");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "CyclomaticComplexity",
+        "The function border() has a Cyclomatic Complexity of 10. The configured cyclomatic complexity threshold is 10.",
+    );
+}
+
+#[test]
+fn cyclomatic_complexity_quiet_below_threshold() {
+    let dir = TempDir::new().unwrap();
+    let ifs: String = (0..8).map(|i| format!("    if a[{i}] {{}}\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "cc.rs",
+        &format!("fn under(a: [bool; 8]) {{\n{ifs}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "CyclomaticComplexity");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_fires_at_threshold_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    // Eight sequential `if`s => NPath 256 with minimum lowered to 256.
+    let ifs: String = (0..8).map(|i| format!("    if a[{i}] {{}}\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "np.rs",
+        &format!("fn paths(a: [bool; 8]) {{\n{ifs}}}\n"),
+    );
+    let xml = np_xml(dir.path(), "np.xml", 256);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "NPathComplexity",
+        "The function paths() has an NPath complexity of 256. The configured NPath complexity threshold is 256.",
+    );
+}
+
+#[test]
+fn npath_complexity_quiet_below_threshold() {
+    let dir = TempDir::new().unwrap();
+    let ifs: String = (0..7).map(|i| format!("    if a[{i}] {{}}\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "np.rs",
+        &format!("fn paths(a: [bool; 7]) {{\n{ifs}}}\n"),
+    );
+    let xml = np_xml(dir.path(), "np.xml", 256);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn excessive_parameter_list_fires_at_ten_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "params.rs", &params_src("many_params", 10));
+    let (code, out, err) = run_only(&path, "ExcessiveParameterList");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveParameterList",
+        "The function many_params has 10 parameters. Consider reducing the number of parameters to less than 10.",
+    );
+}
+
+#[test]
+fn excessive_parameter_list_quiet_at_nine() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "params.rs", &params_src("ok_params", 9));
+    let (code, out, err) = run_only(&path, "ExcessiveParameterList");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn excessive_method_length_fires_at_hundred_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    // 98 body lines + braces = 100 lines of code.
+    let lines: String = (0..98).map(|i| format!("    let _x{i} = {i};\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "long.rs",
+        &format!("fn long_method() {{\n{lines}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "ExcessiveMethodLength");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveMethodLength",
+        "The function long_method() has 100 lines of code. Current threshold is set to 100. Avoid really long methods.",
+    );
+}
+
+#[test]
+fn excessive_method_length_quiet_at_ninety_nine() {
+    let dir = TempDir::new().unwrap();
+    let lines: String = (0..97).map(|i| format!("    let _x{i} = {i};\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "long.rs",
+        &format!("fn almost() {{\n{lines}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "ExcessiveMethodLength");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn excessive_method_length_default_ignore_whitespace_is_false() {
+    let dir = TempDir::new().unwrap();
+    // Raw LOC = 5 (with blank line). Effective LOC without blanks = 4.
+    let path = write_file(
+        dir.path(),
+        "ws.rs",
+        "fn spaced() {\n    let a = 1;\n\n    let b = 2;\n}\n",
+    );
+    let xml = eml_raw_xml(dir.path(), "eml.xml", 5);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveMethodLength",
+        "The function spaced() has 5 lines of code. Current threshold is set to 5. Avoid really long methods.",
+    );
+}
+
+#[test]
+fn excessive_class_length_fires_at_threshold_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    // Two source lines for the type span.
+    let path = write_file(dir.path(), "cls.rs", "struct Tiny {\n}\n");
+    let xml = write_file(
+        dir.path(),
+        "ecl.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl">
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassLength",
+        "The class Tiny has 2 lines of code. Current threshold is 2. Avoid really long classes.",
+    );
+}
+
+#[test]
+fn excessive_class_length_quiet_below_threshold() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "cls.rs", "struct Tiny {\n}\n");
+    let xml = write_file(
+        dir.path(),
+        "ecl.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl">
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="3"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn excessive_class_length_default_ignore_whitespace_is_false() {
+    let dir = TempDir::new().unwrap();
+    // Raw LOC = 4 with a blank line inside the struct; effective without blanks = 3.
+    let path = write_file(dir.path(), "cls.rs", "struct Spaced {\n    a: i32,\n\n}\n");
+    let xml = ecl_raw_xml(dir.path(), "ecl.xml", 4);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassLength",
+        "The class Spaced has 4 lines of code. Current threshold is 4. Avoid really long classes.",
+    );
+}
+
+#[test]
+fn excessive_public_count_fires_at_forty_five_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    let fields: String = (0..45).map(|i| format!("    pub f{i}: i32,\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "wide.rs",
+        &format!("pub struct Wide {{\n{fields}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "ExcessivePublicCount");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessivePublicCount",
+        "The struct Wide has 45 public methods and attributes. Consider reducing the number of public items to less than 45.",
+    );
+}
+
+#[test]
+fn excessive_public_count_quiet_at_forty_four() {
+    let dir = TempDir::new().unwrap();
+    let fields: String = (0..44).map(|i| format!("    pub f{i}: i32,\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "wide.rs",
+        &format!("pub struct Wide {{\n{fields}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "ExcessivePublicCount");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn too_many_fields_fires_on_union_above_fifteen_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "u.rs", &fields_src("union", "Blob", 16));
+    let (code, out, err) = run_only(&path, "TooManyFields");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "TooManyFields",
+        "The union Blob has 16 fields. Consider redesigning Blob to keep the number of fields under 15.",
+    );
+}
+
+#[test]
+fn too_many_fields_skips_enum_variants() {
+    let dir = TempDir::new().unwrap();
+    let variants: String = (0..16).map(|i| format!("    V{i},\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "e.rs",
+        &format!("enum Many {{\n{variants}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "TooManyFields");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn too_many_fields_continues_after_skipped_enum() {
+    let dir = TempDir::new().unwrap();
+    // Enum first (continue). A break mutant would stop the loop and miss Big.
+    let variants: String = (0..4).map(|i| format!("    V{i},\n")).collect();
+    let fields: String = (0..16).map(|i| format!("    f{i}: i32,\n")).collect();
+    let path = write_file(
+        dir.path(),
+        "mix.rs",
+        &format!("enum Skip {{\n{variants}}}\n\nstruct Big {{\n{fields}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "TooManyFields");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        8,
+        "TooManyFields",
+        "The struct Big has 16 fields. Consider redesigning Big to keep the number of fields under 15.",
+    );
+    assert!(
+        !out.contains("Skip"),
+        "enum must stay quiet: stdout={out:?}"
+    );
+}
+
+#[test]
+fn too_many_fields_struct_exact_message_above_fifteen() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "s.rs", &fields_src("struct", "Big", 16));
+    let (code, out, err) = run_only(&path, "TooManyFields");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "TooManyFields",
+        "The struct Big has 16 fields. Consider redesigning Big to keep the number of fields under 15.",
+    );
+}
+
+#[test]
+fn too_many_methods_quiet_at_twenty_five() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "busy.rs",
+        &methods_src("", "Busy", |i| format!("    fn work{i}(&self) {{}}\n"), 25),
+    );
+    let (code, out, err) = run_only(&path, "TooManyMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn too_many_methods_fires_at_twenty_six_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "busy.rs",
+        &methods_src("", "Busy", |i| format!("    fn work{i}(&self) {{}}\n"), 26),
+    );
+    let (code, out, err) = run_only(&path, "TooManyMethods");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "TooManyMethods",
+        "The struct Busy has 26 non-getter- and setter-methods. Consider refactoring Busy to keep number of methods under 25.",
+    );
+}
+
+#[test]
+fn too_many_public_methods_quiet_at_ten() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "api.rs",
+        &methods_src("pub ", "Api", |i| format!("    pub fn work{i}(&self) {{}}\n"), 10),
+    );
+    let (code, out, err) = run_only(&path, "TooManyPublicMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn too_many_public_methods_fires_at_eleven_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "api.rs",
+        &methods_src("pub ", "Api", |i| format!("    pub fn work{i}(&self) {{}}\n"), 11),
+    );
+    let (code, out, err) = run_only(&path, "TooManyPublicMethods");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "TooManyPublicMethods",
+        "The struct Api has 11 public methods. Consider refactoring Api to keep number of public methods under 10.",
+    );
+}
+
+#[test]
+fn too_many_public_methods_ignores_private_methods() {
+    let dir = TempDir::new().unwrap();
+    // 9 public + 20 private non-ignored: must stay quiet (AND filter).
+    // An OR / drop-is_public mutant would count the private methods and fire.
+    let mut methods = String::new();
+    for i in 0..9 {
+        methods.push_str(&format!("    pub fn work{i}(&self) {{}}\n"));
+    }
+    for i in 0..20 {
+        methods.push_str(&format!("    fn hidden{i}(&self) {{}}\n"));
+    }
+    let path = write_file(
+        dir.path(),
+        "api.rs",
+        &format!("pub struct Api {{}}\n\nimpl Api {{\n{methods}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "TooManyPublicMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn too_many_public_methods_ignores_get_set_prefix() {
+    let dir = TempDir::new().unwrap();
+    // 9 public work + 11 public get_*: ignore pattern keeps count at 9.
+    let mut methods = String::new();
+    for i in 0..9 {
+        methods.push_str(&format!("    pub fn work{i}(&self) {{}}\n"));
+    }
+    for i in 0..11 {
+        methods.push_str(&format!("    pub fn get_value{i}(&self) {{}}\n"));
+    }
+    let path = write_file(
+        dir.path(),
+        "api.rs",
+        &format!("pub struct Api {{}}\n\nimpl Api {{\n{methods}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "TooManyPublicMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn excessive_class_complexity_fires_at_fifty_with_exact_message() {
+    let dir = TempDir::new().unwrap();
+    // Ten methods each with four `if`s => CCN 5 each => WMC 50.
+    let methods: String = (0..10)
+        .map(|i| {
+            format!(
+                "    fn m{i}(&self, a: i32, b: i32, c: i32, d: i32) {{\n\
+        if a > 0 {{}}\n\
+        if b > 0 {{}}\n\
+        if c > 0 {{}}\n\
+        if d > 0 {{}}\n\
+    }}\n"
+            )
+        })
+        .collect();
+    let path = write_file(
+        dir.path(),
+        "heavy.rs",
+        &format!("struct Heavy {{}}\n\nimpl Heavy {{\n{methods}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "ExcessiveClassComplexity");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassComplexity",
+        "The class Heavy has an overall complexity of 50 which is very high. The configured complexity threshold is 50.",
+    );
+}
+
+#[test]
+fn excessive_class_complexity_quiet_at_forty_nine() {
+    let dir = TempDir::new().unwrap();
+    // Nine methods with four `if`s (CCN 5) + one with three `if`s (CCN 4) = 49.
+    let mut methods = String::new();
+    for i in 0..9 {
+        methods.push_str(&format!(
+            "    fn m{i}(&self, a: i32, b: i32, c: i32, d: i32) {{\n\
+        if a > 0 {{}}\n\
+        if b > 0 {{}}\n\
+        if c > 0 {{}}\n\
+        if d > 0 {{}}\n\
+    }}\n"
+        ));
+    }
+    methods.push_str(
+        "    fn last(&self, a: i32, b: i32, c: i32) {\n\
+        if a > 0 {}\n\
+        if b > 0 {}\n\
+        if c > 0 {}\n\
+    }\n",
+    );
+    let path = write_file(
+        dir.path(),
+        "heavy.rs",
+        &format!("struct Heavy {{}}\n\nimpl Heavy {{\n{methods}}}\n"),
+    );
+    let (code, out, err) = run_only(&path, "ExcessiveClassComplexity");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
