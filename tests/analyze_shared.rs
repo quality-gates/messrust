@@ -1368,3 +1368,97 @@ fn unused_private_field_counts_field_inside_macro_group() {
     assert!(out.contains("dead_field"), "stdout={out:?}");
     assert!(!out.contains("used_field"), "stdout={out:?}");
 }
+
+#[test]
+fn unused_private_field_not_marked_used_by_leading_macro_ident() {
+    let dir = TempDir::new().unwrap();
+    // If after_dot starts true, the first macro ident is wrongly stored as a field read.
+    let path = write_file(
+        dir.path(),
+        "mac_lead.rs",
+        "struct Host { value: i32 }\nfn show(h: &Host) {\n    let value = 1;\n    dbg!(value);\n    let _ = h;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("value"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_private_field_requires_dot_reset_between_macro_idents() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "mac_reset.rs",
+        "struct Host { live: i32, dead: i32 }\nfn show(h: &Host) {\n    println!(\"{:?}\", h.live);\n    let dead = 1;\n    dbg!(dead);\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedPrivateField",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("dead"), "stdout={out:?}");
+    assert!(!out.contains("'live'"), "stdout={out:?}");
+}
+
+#[test]
+fn unused_local_field_assign_counts_base_as_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "field_as.rs",
+        "struct Wrapper { inner: i32 }\nfn work() {\n    let mut host = Wrapper { inner: 0 };\n    host.inner = 1;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_tuple_field_assign_counts_bases_as_reads() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "tuple_field_as.rs",
+        "struct Pair { a: i32, b: i32 }\nfn work() {\n    let mut left = Pair { a: 0, b: 0 };\n    let mut right = Pair { a: 0, b: 0 };\n    (left.a, right.b) = (1, 2);\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_format_nested_group_capture() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fmt_nested.rs",
+        "fn work() {\n    let name = 1;\n    assert_eq!(name, name);\n    let other = 2;\n    println!(\"{}\", { other });\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--only",
+        "UnusedLocalVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
