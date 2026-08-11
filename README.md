@@ -29,8 +29,8 @@ messrust src sarif rust --ignore-tests --reportfile reports/messrust.sarif
 messrust src github rust --ignore-tests
 ```
 
-Use these guides to understand each finding and select the correct rules for
-your project:
+Use these guides to understand each finding. They also help you select the
+correct rules for your project:
 
 - [Code size and complexity](docs/codesize-metrics.md)
 - [Name length and intent](docs/naming-adaptations.md)

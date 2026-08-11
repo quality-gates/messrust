@@ -1,7 +1,7 @@
 # Unused Code Rules for Rust
 
-Use these rules to find private fields, local bindings, private methods, and
-parameters that the source does not read or call.
+Use these rules to find unused private fields, local bindings, private
+methods, and parameters.
 
 `messrust` uses single-file, syntax-only analysis. It does not use the crate
 graph, name resolution, macro expansion, or type checking. This makes the
@@ -132,9 +132,9 @@ parameter when the file-wide read set does not contain that parameter name. A
 read of the same name in another function can prevent a finding.
 
 The rule is in `opinionated`, not `rust`. Enable it when the project controls
-the function signatures. Keep it disabled, or use underscore names, when
-traits, callbacks, generated interfaces, or foreign interfaces require the
-parameter.
+the function signatures. Keep it disabled when an external interface requires
+the parameter. If you enable the rule, prefix a required unused parameter with
+an underscore.
 
 ## Configure an exception
 

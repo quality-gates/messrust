@@ -1,7 +1,7 @@
 # Design Rules for Rust
 
-Use these rules to find code that is difficult to test, code that hides errors,
-and types that contain too many unrelated responsibilities. The rules use Rust
+Use these rules to find code that is difficult to test. They also find hidden
+errors and types with too many unrelated responsibilities. The rules use Rust
 syntax only. They do not build the crate or resolve types across files.
 
 ## Start with the recommended policy
@@ -61,8 +61,9 @@ match save() {
 }
 ```
 
-Handle or return the error. You can also record it in the project log. If the
-code must ignore it, add a narrow suppression and a comment with the reason:
+Handle the error. Return it when the caller must make the decision. You can
+also record it in the project log. If the code must ignore it, add a narrow
+suppression. Put the reason in an adjacent comment:
 
 ```rust
 // A missing optional cache file is safe during the first start.
@@ -113,8 +114,10 @@ The default names are:
 - `dbg` and `dbg!`.
 
 A finding can show debug output that a developer forgot to remove. It can also
-show deliberate command-line output. For a CLI, put user output in `main` or a
-dedicated output module. Suppress or configure the rule in that location.
+show deliberate command-line output. For a small CLI, put user output in
+`main`. For a larger CLI, use a dedicated output module. Add a source
+suppression at that location. To disable the rule for the project, add
+`--disable DevelopmentCodeFragment` to the command.
 
 Use `unwanted-functions` to add project-specific function or macro names.
 Names are comma-separated.

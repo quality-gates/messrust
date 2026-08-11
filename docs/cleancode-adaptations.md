@@ -118,8 +118,9 @@ if {
 }
 ```
 
-Move the state change before the condition, or use `let`, `if let`, or
-`while let` so the binding is explicit. The rule checks `=` assignments. It
+Move the state change before the condition. As another option, use `let`,
+`if let`, or `while let` to make the binding explicit. The rule checks `=`
+assignments. It
 does not check compound assignments such as `+=`. Pattern bindings in `if let`
 and `while let` are not assignments and do not produce a finding.
 
@@ -154,15 +155,15 @@ It does not report:
 
 - `Self::make()`;
 - a snake_case module path;
-- an associated-item path that is not called;
-- a type listed in `exceptions`;
+- an associated-item path without a call;
+- a type when `exceptions` contains its name;
 - a call in a method that matches `ignorepattern`.
 
-A finding shows a direct dependency on the named type. To replace that
-dependency in a test, pass a trait implementation, a function, or an owned
-service to the enclosing type or method. Do not add an interface for stable
-value constructors and standard utility types. Calls to these types are
-common in Rust, so the rule is in `opinionated`.
+A finding shows a direct dependency on the named type. Possible replacement
+interfaces are a trait implementation, a function, and an owned service. Pass
+the selected interface to the enclosing type or method. Do not add an
+interface for stable value constructors and standard utility types. Calls to
+these types are common in Rust, so the rule is in `opinionated`.
 
 ## Walk boundaries
 
