@@ -9,8 +9,6 @@ again.
 your project. You do not have to install the project dependencies. It provides
 a PHPMD-style rule catalogue, ruleset XML, report formats, and exit codes.
 
-[![Mutation](https://github.com/quality-gates/messrust/actions/workflows/mutation.yml/badge.svg)](https://github.com/quality-gates/messrust/actions/workflows/mutation.yml)
-
 ## Quick start
 
 ```console
@@ -30,6 +28,16 @@ messrust src text rust,opinionated --ignore-tests
 messrust src sarif rust --ignore-tests --reportfile reports/messrust.sarif
 messrust src github rust --ignore-tests
 ```
+
+Use these guides to understand each finding. They also help you select the
+correct rules for your project:
+
+- [Code size and complexity](docs/codesize-metrics.md)
+- [Name length and intent](docs/naming-adaptations.md)
+- [Unused code](docs/unusedcode-adaptations.md)
+- [Control flow and direct dependencies](docs/cleancode-adaptations.md)
+- [Design, error handling, and cohesion](docs/design-adaptations.md)
+- [Rust style names](docs/controversial-adaptations.md)
 
 ## Install
 
@@ -173,17 +181,6 @@ with the default policy:
 
 The self-analysis step has no baseline and no violation-ignore option. A
 finding fails CI with exit code `2`.
-
-## Rule adaptations
-
-The component catalog is adapted to Rust syntax and semantics:
-
-- [Code size](docs/codesize-metrics.md)
-- [Naming](docs/naming-adaptations.md)
-- [Unused code](docs/unusedcode-adaptations.md)
-- [Clean code](docs/cleancode-adaptations.md)
-- [Design](docs/design-adaptations.md)
-- [Controversial rules](docs/controversial-adaptations.md)
 
 ## Mutation testing
 
