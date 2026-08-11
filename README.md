@@ -1,22 +1,48 @@
 # messrust
 
+Find Rust maintenance problems before they become difficult to fix: large
+functions and types, complex control flow and dependencies, unused private
+code, unclear names, and other problems that code reviews find again and
+again.
+
+`messrust` is a local CLI. It parses Rust source, but it does not build or run
+your project. You do not have to install the project dependencies. It provides
+a PHPMD-style rule catalogue, ruleset XML, report formats, and exit codes.
+
 [![Mutation](https://github.com/quality-gates/messrust/actions/workflows/mutation.yml/badge.svg)](https://github.com/quality-gates/messrust/actions/workflows/mutation.yml)
 
-`messrust` is a syntax-only static analyser for Rust. It uses a PHPMD-style
-rule catalogue, ruleset XML, report formats, and exit codes. It does not build,
-run, or execute the code that it checks.
+## Quick start
+
+```console
+cargo install messrust
+messrust src text rust --ignore-tests
+```
+
+This command checks `src` with the recommended low-noise ruleset and prints
+findings to standard output. Exit code `0` means that the check is clean. Exit
+code `2` means that findings exist. Exit code `1` means that the tool or a
+source file failed.
+
+Common next steps:
+
+```console
+messrust src text rust,opinionated --ignore-tests
+messrust src sarif rust --ignore-tests --reportfile reports/messrust.sarif
+messrust src github rust --ignore-tests
+```
 
 ## Install
 
-Install the released command with Cargo:
+Install the released command and confirm the version:
 
-```text
+```console
 cargo install messrust
+messrust --version
 ```
 
 For a local checkout:
 
-```text
+```console
 cargo build --release
 ./target/release/messrust src text rust --ignore-tests
 ```
@@ -25,7 +51,7 @@ The package and binary are both named `messrust`. A release is ready for
 crates.io after `cargo package --locked` succeeds. Publishing is a manual
 release step:
 
-```text
+```console
 cargo publish
 ```
 
