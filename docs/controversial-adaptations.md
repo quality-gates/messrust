@@ -1,7 +1,8 @@
 # Rust Style Naming Rules
 
-The ruleset is named `controversial` for PHPMD catalog compatibility. In
-`messrust`, its live rules check normal Rust naming forms: PascalCase for types
+The PHPMD catalog calls this ruleset `controversial`. `messrust` keeps that
+name for compatibility. Its live rules check normal Rust naming forms:
+PascalCase for types
 and snake_case for functions, methods, fields, parameters, and local bindings.
 
 The recommended `rust` policy includes all of these rules. They are useful when
@@ -53,9 +54,9 @@ enum ConnectionState {
 trait MessageStore {}
 ```
 
-With the default `camelcase-abbreviations=false`, a name such as `HTTPClient`
-is accepted. Set the property to `true` when the project requires Rust-style
-capitalization for abbreviations:
+With the default `camelcase-abbreviations=false`, the rule accepts a name such
+as `HTTPClient`. Set the property to `true` when the project requires
+Rust-style capitalization for abbreviations:
 
 ```rust
 struct HttpClient;
@@ -114,8 +115,8 @@ fn callback(_request_id: u64) {}
 ## Local variable names
 
 `CamelCaseVariableName` checks local bindings. It also checks names introduced
-by `for` and `while let` patterns. Local bindings inside a visited closure are
-included, but the closure parameter names are not.
+by `for` and `while let` patterns. The collector includes local bindings inside
+a visited closure. It does not include closure parameter names.
 
 ```rust
 let retry_count = 3;
@@ -149,8 +150,8 @@ messrust src text path/to/rust-style.xml --ignore-tests
 
 ## Fix or suppress
 
-Prefer to rename a private item and run tests. For a public item, treat the
-rename as an API change and update downstream users as required.
+Rename a private item. Then run the tests. For a public item, treat the rename
+as an API change. Update downstream users as required.
 
 Use a narrow suppression when an external protocol or generated interface
 requires a non-Rust name:

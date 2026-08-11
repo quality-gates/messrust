@@ -58,8 +58,8 @@ these names to the `exceptions` property instead of making the name longer
 without adding meaning.
 
 A long type name can show that one type represents too many details. Before
-you shorten it, check if the type must be split or moved to a module that gives
-the name more context.
+you shorten it, check if separate types better represent the details. Also
+check if a module can give the name more context.
 
 `LongClassName` can subtract one configured prefix and one configured suffix
 from its length calculation. This is useful for required names such as code

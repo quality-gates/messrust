@@ -49,8 +49,9 @@ file. Before you delete code, check these cases:
 4. A test can use the item when you run with `--ignore-tests`.
 5. A write can be deliberate even when there is no read.
 
-If none of these cases applies, remove the unused item and run the crate tests.
-The Rust compiler remains the authority for name resolution and type checks.
+If none of these cases applies, remove the unused item. Then run the crate
+tests. The Rust compiler remains the authority for name resolution and type
+checks.
 
 ## Shared Rust conventions
 
@@ -91,8 +92,8 @@ struct Worker {
 }
 ```
 
-A constructor write does not count as a read. If a field is only initialized,
-confirm that it is still required.
+A constructor write does not count as a read. If code only initializes a
+field, confirm that the field is still required.
 
 ## `UnusedLocalVariable`
 

@@ -13,9 +13,9 @@ messrust src text rust --ignore-tests
 | Rule | In `rust` | Main concern |
 | --- | --- | --- |
 | `DevelopmentCodeFragment` | Yes | Debug output remains in production code. |
-| `EmptyCatchBlock` | Yes | An error result is silently ignored. |
+| `EmptyCatchBlock` | Yes | Code ignores an error result. |
 | `CouplingBetweenObjects` | Yes | A type names many dependencies. |
-| `GlobalVariable` | Yes | Mutable static state is written. |
+| `GlobalVariable` | Yes | Code writes mutable static state. |
 | `LackOfCohesionOfMethods` | Yes | A type has separate method groups. |
 | `CountInLoopExpression` | No; in `opinionated` | A loop recalculates a length or capacity. |
 | `ExitExpression` | No; in `opinionated` | Library code stops the process. |
@@ -175,7 +175,7 @@ requirements.
 ### `LackOfCohesionOfMethods`
 
 This rule calculates LCOM4 for each struct, enum, and union. It does not check
-traits. Two methods are connected when they:
+traits. `messrust` connects two methods when they:
 
 - use the same field; or
 - call each other through `self`.
@@ -183,9 +183,9 @@ traits. Two methods are connected when they:
 The metric is the number of disconnected method groups. The default maximum
 is 1, so a value above 1 reports a finding.
 
-Trivial getters and setters are not graph nodes. A call to a getter counts as
-use of its field. A stateless method with no field use and no sibling call is
-ignored.
+The graph does not include trivial getters and setters as nodes. A call to a
+getter counts as use of its field. The calculation ignores a stateless method
+that has no field use and no sibling call.
 
 A finding can show a type with separate responsibilities:
 

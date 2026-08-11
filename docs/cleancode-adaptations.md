@@ -134,7 +134,7 @@ Point { x: 1, y: 2, x: 3 }
 
 Rust rejects this code during compilation. `messrust` still reports it because
 syntax-only checks can run before a build and because the catalog keeps PHPMD
-rule identity. Map macros are not checked because `messrust` does not expand
+rule identity. `messrust` does not check map macros because it does not expand
 macros.
 
 ## `StaticAccess`
