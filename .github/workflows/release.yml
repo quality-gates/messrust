@@ -28,8 +28,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       version: ${{ steps.release.outputs.version }}
-      source_sha: ${{ steps.release.outputs.source_sha }}
-      immutable_release: ${{ steps.release.outputs.immutable_release }}
+      source_sha: ${{ steps.release.outputs['source-sha'] }}
+      immutable_release: ${{ steps.release.outputs['immutable-release'] }}
     steps:
       - name: Check out the tagged source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
