@@ -1,0 +1,473 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag to retry
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  validate:
+    name: Validate release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      immutable_release: ${{ steps.release.outputs.immutable_release }}
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - name: Install the release Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.85.1
+      - id: release
+        name: Require one remote stable tag and matching Cargo version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tags must have the vMAJOR.MINOR.PATCH format; got: $TAG" >&2
+            exit 1
+          fi
+
+          version="${TAG#v}"
+          source_sha="$(git rev-parse "$TAG^{commit}")"
+          test "$(git rev-parse HEAD)" = "$source_sha"
+
+          remote_refs="$(git ls-remote --exit-code origin "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          remote_sha="$(awk '$2 ~ /\^\{\}$/ { print $1 }' <<<"$remote_refs")"
+          if [[ -z "$remote_sha" ]]; then
+            remote_sha="$(awk -v ref="refs/tags/$TAG" '$2 == ref { print $1 }' <<<"$remote_refs")"
+          fi
+          if [[ "$remote_sha" != "$source_sha" ]]; then
+            echo "The remote tag resolves to $remote_sha, not $source_sha." >&2
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == push ]]; then
+            test "$REF_TYPE" = tag
+            test "$REF_NAME" = "$TAG"
+            test "$EVENT_SHA" = "$source_sha"
+          else
+            test "$EVENT_NAME" = workflow_dispatch
+          fi
+
+          mapfile -t manifest_versions < <(
+            cargo metadata --locked --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "messrust") | .version'
+          )
+          if [[ "${#manifest_versions[@]}" -ne 1 || "${manifest_versions[0]}" != "$version" ]]; then
+            echo "Cargo.toml must contain messrust version $version." >&2
+            exit 1
+          fi
+
+          immutable_release=false
+          if release="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
+            if [[ "$(jq -r .draft <<<"$release")" == false && \
+              "$(jq -r .prerelease <<<"$release")" == false && \
+              "$(jq -r .immutable <<<"$release")" == true ]]; then
+              immutable_release=true
+            fi
+          fi
+
+          {
+            echo "version=$version"
+            echo "source_sha=$source_sha"
+            echo "immutable_release=$immutable_release"
+          } >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Run the full release test suite
+    needs: validate
+    if: needs.validate.outputs.immutable_release != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.85.1
+      - run: cargo test --all-targets --locked
+      - name: Build and run self-analysis
+        run: |
+          cargo build --release --locked
+          ./target/release/messrust src text rust --ignore-tests
+
+  build:
+    name: Build native darwin/${{ matrix.arch }} archive
+    needs: [validate, test]
+    if: needs.validate.outputs.immutable_release != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            machine: arm64
+            runner: macos-15
+          - arch: amd64
+            machine: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.85.1
+      - name: Build and package on the target architecture
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          MACHINE: ${{ matrix.machine }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$MACHINE"
+          cargo build --release --locked
+          test "$(target/release/messrust --version)" = "messrust $VERSION"
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          scripts/package-release \
+            "$VERSION" "$ARCH" target/release/messrust dist "$source_date_epoch"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: messrust-darwin-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Make the release asset set
+    needs: [validate, build]
+    if: needs.validate.outputs.immutable_release != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: messrust-darwin-*
+          path: dist
+          merge-multiple: true
+      - name: Require both archives and make checksums
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected="$(printf '%s\n' \
+            "messrust_${VERSION}_darwin_amd64.tar.gz" \
+            "messrust_${VERSION}_darwin_arm64.tar.gz" | LC_ALL=C sort)"
+          actual="$(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          (cd dist && sha256sum messrust_*.tar.gz | LC_ALL=C sort > checksums.txt)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: Smoke exact darwin/${{ matrix.arch }} release bytes
+    needs: [validate, package]
+    if: needs.validate.outputs.immutable_release != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            machine: arm64
+            runner: macos-15
+          - arch: amd64
+            machine: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-assets
+          path: dist
+      - name: Verify, extract, and run the archive
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          MACHINE: ${{ matrix.machine }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$MACHINE"
+          (cd dist && shasum -a 256 -c checksums.txt)
+          archive="dist/messrust_${VERSION}_darwin_${ARCH}.tar.gz"
+          expected_entries="$(printf '%s\n' LICENSE messrust | LC_ALL=C sort)"
+          actual_entries="$(tar -tzf "$archive" | LC_ALL=C sort)"
+          test "$actual_entries" = "$expected_entries"
+          mkdir extracted
+          tar -xzf "$archive" -C extracted
+          cmp LICENSE extracted/LICENSE
+          test -x extracted/messrust
+          test "$(lipo -archs extracted/messrust)" = "$MACHINE"
+          test "$(extracted/messrust --version)" = "messrust $VERSION"
+          printf 'fn main() {}\n' > "$RUNNER_TEMP/smoke.rs"
+          extracted/messrust "$RUNNER_TEMP/smoke.rs" json rust > "$RUNNER_TEMP/report.json"
+          jq -e --arg version "$VERSION" \
+            '.package == "messrust" and .version == $version and (.files | length == 0)' \
+            "$RUNNER_TEMP/report.json" >/dev/null
+
+  release:
+    name: Publish the immutable GitHub release
+    needs: [validate, smoke]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      (needs.smoke.result == 'success' || needs.validate.outputs.immutable_release == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+      arm64_sha: ${{ steps.release.outputs.arm64_sha }}
+      amd64_sha: ${{ steps.release.outputs.amd64_sha }}
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: needs.validate.outputs.immutable_release != 'true'
+        with:
+          name: release-assets
+          path: dist
+      - id: release
+        name: Create or verify one immutable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          remote_tag_sha() {
+            local refs peeled sha
+            refs="$(git ls-remote --exit-code \
+              "https://github.com/$GH_REPO.git" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+            peeled="$(awk '$2 ~ /\^\{\}$/ { print $1 }' <<<"$refs")"
+            sha="${peeled:-$(awk -v ref="refs/tags/$TAG" '$2 == ref { print $1 }' <<<"$refs")}"
+            printf '%s\n' "$sha"
+          }
+          remote_sha="$(remote_tag_sha)"
+          if [[ "$remote_sha" != "$SOURCE_SHA" ]]; then
+            echo "The remote tag changed after validation. Release publication is blocked." >&2
+            exit 1
+          fi
+
+          arm64_asset="messrust_${VERSION}_darwin_arm64.tar.gz"
+          amd64_asset="messrust_${VERSION}_darwin_amd64.tar.gz"
+          expected_assets="$(printf '%s\n' "$amd64_asset" "$arm64_asset" checksums.txt | LC_ALL=C sort)"
+
+          if release="$(gh release view "$TAG" --json databaseId,isDraft 2>/dev/null)"; then
+            release_id="$(jq -r .databaseId <<<"$release")"
+            is_draft="$(jq -r .isDraft <<<"$release")"
+            if [[ "$is_draft" != true ]]; then
+              published_release="$(gh api "repos/$GH_REPO/releases/$release_id")"
+              if [[ "$(jq -r .prerelease <<<"$published_release")" != false ]]; then
+                echo "The existing release is a pre-release." >&2
+                exit 1
+              fi
+              if [[ "$(jq -r .immutable <<<"$published_release")" != true ]]; then
+                echo "The existing published release is not immutable." >&2
+                exit 1
+              fi
+              rm -rf dist
+              mkdir dist
+              gh release download "$TAG" --dir dist
+            fi
+          else
+            gh release create "$TAG" --draft --verify-tag \
+              --title "messrust $VERSION" --generate-notes
+            release="$(gh release view "$TAG" --json databaseId,isDraft)"
+            release_id="$(jq -r .databaseId <<<"$release")"
+            is_draft="$(jq -r .isDraft <<<"$release")"
+          fi
+          release_api="repos/$GH_REPO/releases/$release_id"
+          release_state="$(gh api "$release_api")"
+          test "$(jq -r .tag_name <<<"$release_state")" = "$TAG"
+          if [[ "$(jq -r .prerelease <<<"$release_state")" != false ]]; then
+            echo "The release is a pre-release." >&2
+            exit 1
+          fi
+
+          local_assets="$(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$local_assets" != "$expected_assets" ]]; then
+            echo "The local release asset set is not valid." >&2
+            diff -u <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$local_assets") || true
+            exit 1
+          fi
+          manifest_assets="$(awk 'NF == 2 { sub(/^\*/, "", $2); print $2 }' dist/checksums.txt | LC_ALL=C sort)"
+          expected_manifest="$(printf '%s\n' "$amd64_asset" "$arm64_asset" | LC_ALL=C sort)"
+          test "$manifest_assets" = "$expected_manifest"
+          (cd dist && sha256sum -c checksums.txt)
+
+          if [[ "$is_draft" == true ]]; then
+            draft_assets="$(jq -r '[.assets[].name] | sort | .[]' <<<"$release_state")"
+            unexpected_assets="$(comm -13 \
+              <(printf '%s\n' "$expected_assets") \
+              <(printf '%s\n' "$draft_assets"))"
+            if [[ -n "$unexpected_assets" ]]; then
+              echo "The draft has an unexpected asset. No asset was uploaded." >&2
+              printf '%s\n' "$unexpected_assets" >&2
+              exit 1
+            fi
+
+            mkdir -p existing
+            for asset in dist/*; do
+              name="$(basename "$asset")"
+              if gh api "$release_api" --jq '.assets[].name' | grep -Fxq "$name"; then
+                gh release download "$TAG" --pattern "$name" --dir existing
+                if ! cmp -s "$asset" "existing/$name"; then
+                  echo "Draft asset differs from the verified build: $name" >&2
+                  exit 1
+                fi
+              else
+                gh release upload "$TAG" "$asset"
+              fi
+            done
+          fi
+
+          actual_assets="$(gh api "$release_api" --jq '[.assets[].name] | sort | .[]')"
+          if [[ "$actual_assets" != "$expected_assets" ]]; then
+            echo "The GitHub release does not contain the exact asset set." >&2
+            diff -u <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$actual_assets") || true
+            exit 1
+          fi
+
+          if [[ "$is_draft" == true ]]; then
+            if [[ "$(remote_tag_sha)" != "$SOURCE_SHA" ]]; then
+              echo "The remote tag changed before publication." >&2
+              exit 1
+            fi
+            gh release edit "$TAG" --draft=false --latest
+          fi
+
+          immutable=false
+          for _attempt in {1..6}; do
+            immutable="$(gh api "$release_api" --jq .immutable)"
+            [[ "$immutable" == true ]] && break
+            sleep 5
+          done
+          if [[ "$immutable" != true ]]; then
+            echo "The published release is not immutable. Homebrew publication is blocked." >&2
+            exit 1
+          fi
+          if [[ "$(remote_tag_sha)" != "$SOURCE_SHA" ]]; then
+            echo "The remote tag changed during publication. Homebrew publication is blocked." >&2
+            exit 1
+          fi
+          final_assets="$(gh api "$release_api" --jq '[.assets[].name] | sort | .[]')"
+          if [[ "$final_assets" != "$expected_assets" ]]; then
+            echo "The immutable release has an unexpected asset set." >&2
+            exit 1
+          fi
+
+          gh release verify "$TAG"
+          for asset in dist/*; do
+            gh release verify-asset "$TAG" "$asset"
+          done
+          arm64_sha="$(awk -v asset="$arm64_asset" '$2 == asset { print $1 }' dist/checksums.txt)"
+          amd64_sha="$(awk -v asset="$amd64_asset" '$2 == asset { print $1 }' dist/checksums.txt)"
+          [[ "$arm64_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$amd64_sha" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "release_id=$release_id"
+            echo "arm64_sha=$arm64_sha"
+            echo "amd64_sha=$amd64_sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  homebrew:
+    name: Update the Homebrew tap
+    needs: [validate, release]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: homebrew
+    steps:
+      - id: app-token
+        name: Make a repository-scoped GitHub App token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: quality-gates
+          repositories: homebrew-tap
+          permission-actions: write
+      - id: dispatch
+        name: Dispatch the tap-owned formula workflow on main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          ARM64_SHA: ${{ needs.release.outputs.arm64_sha }}
+          AMD64_SHA: ${{ needs.release.outputs.amd64_sha }}
+        run: |
+          set -euo pipefail
+          response="$(gh api --method POST \
+            repos/quality-gates/homebrew-tap/actions/workflows/publish-formula.yml/dispatches \
+            -F return_run_details=true \
+            -f ref=main \
+            -f 'inputs[tool]=messrust' \
+            -f "inputs[tag]=$TAG" \
+            -f "inputs[version]=$VERSION" \
+            -f "inputs[release_id]=$RELEASE_ID" \
+            -f "inputs[source_sha]=$SOURCE_SHA" \
+            -f "inputs[arm64_asset]=messrust_${VERSION}_darwin_arm64.tar.gz" \
+            -f "inputs[amd64_asset]=messrust_${VERSION}_darwin_amd64.tar.gz" \
+            -f "inputs[arm64_sha]=$ARM64_SHA" \
+            -f "inputs[amd64_sha]=$AMD64_SHA")"
+          run_id="$(jq -r .workflow_run_id <<<"$response")"
+          run_url="$(jq -r .html_url <<<"$response")"
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          [[ "$run_url" == https://github.com/quality-gates/homebrew-tap/actions/runs/* ]]
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Tap publication: $run_url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait for tap publication
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: gh run watch "$RUN_ID" --repo quality-gates/homebrew-tap --exit-status

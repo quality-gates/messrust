@@ -39,6 +39,15 @@ What each rule checks:
 
 ## Install
 
+With Homebrew on macOS:
+
+```console
+brew install quality-gates/tap/messrust
+messrust --version
+```
+
+With Cargo:
+
 ```console
 cargo install messrust
 messrust --version
@@ -107,6 +116,8 @@ fails the job with exit code `2`.
 ## Maintainers
 
 Command reference and report formats: [docs/usage.md](docs/usage.md).
+Homebrew release and recovery steps:
+[docs/homebrew-release.md](docs/homebrew-release.md).
 
 Mutation measurement uses `mutarust` with the committed `mutarust.yml` policy
 (`min_msi: 75`, `min_covered_msi: 80`). Thresholds do not move down. On machines
