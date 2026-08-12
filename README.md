@@ -1,13 +1,11 @@
 # messrust
 
-Find Rust maintenance problems before they become difficult to fix: large
-functions and types, complex control flow and dependencies, unused private
-code, unclear names, and other problems that code reviews find again and
-again.
+Catch maintainability problems in Rust before they calcify: oversized functions
+and types, tangled dependencies, dead private code, muddy naming, and other
+mess that reviews keep rediscovering.
 
-`messrust` is a local CLI. It parses Rust source, but it does not build or run
-your project. You do not have to install the project dependencies. It provides
-a PHPMD-style rule catalogue, ruleset XML, report formats, and exit codes.
+`messrust` is a local CLI. It parses Rust source, never builds or runs your
+project, and needs no project dependencies installed.
 
 ## Quick start
 
@@ -16,10 +14,9 @@ cargo install messrust
 messrust src text rust --ignore-tests
 ```
 
-This command checks `src` with the recommended low-noise ruleset and prints
-findings to standard output. Exit code `0` means that the check is clean. Exit
-code `2` means that findings exist. Exit code `1` means that the tool or a
-source file failed.
+That scans `src` with the recommended low-noise policy and prints findings on
+stdout. Exit `0` is clean, `2` means findings, `1` means the tool or a source
+file failed.
 
 Common next steps:
 
@@ -29,218 +26,103 @@ messrust src sarif rust --ignore-tests --reportfile reports/messrust.sarif
 messrust src github rust --ignore-tests
 ```
 
-Use these guides to understand each finding. They also help you select the
-correct rules for your project:
+Full command syntax, options, and discovery: [docs/usage.md](docs/usage.md).
 
-- [Code size and complexity](docs/codesize-metrics.md)
-- [Name length and intent](docs/naming-adaptations.md)
-- [Unused code](docs/unusedcode-adaptations.md)
-- [Control flow and direct dependencies](docs/cleancode-adaptations.md)
-- [Design, error handling, and cohesion](docs/design-adaptations.md)
-- [Rust style names](docs/controversial-adaptations.md)
+What each rule checks:
+
+- [Code size and complexity](docs/codesize.md)
+- [Name length and intent](docs/naming.md)
+- [Unused code](docs/unusedcode.md)
+- [Control flow and direct dependencies](docs/cleancode.md)
+- [Design, errors, and cohesion](docs/design.md)
+- [Rust style names](docs/controversial.md)
 
 ## Install
-
-Install the released command and confirm the version:
 
 ```console
 cargo install messrust
 messrust --version
 ```
 
-For a local checkout:
+From a local checkout:
 
 ```console
 cargo build --release
 ./target/release/messrust src text rust --ignore-tests
 ```
 
-The package and binary are both named `messrust`. A release is ready for
-crates.io after `cargo package --locked` succeeds. Publishing is a manual
-release step:
+## Tune the gate
+
+Start with `rust`. Add `opinionated` when you want the stricter checks the
+recommended set leaves out. Point at a custom XML ruleset when thresholds or
+membership need to live in the repo:
+
+```xml
+<ruleset name="team policy">
+  <rule ref="rust">
+    <exclude name="DevelopmentCodeFragment" />
+  </rule>
+  <rule ref="LongVariable">
+    <priority>2</priority>
+    <properties>
+      <property name="maximum" value="50" />
+    </properties>
+  </rule>
+</ruleset>
+```
 
 ```console
-cargo publish
+messrust src text path/to/team-policy.xml --ignore-tests
 ```
 
-## Command
-
-```text
-messrust <paths> <format> <ruleset[,ruleset...]> [options]
-```
-
-Examples:
-
-```text
-messrust src text rust
-messrust src json rust --ignore-tests --reportfile messrust.json
-messrust src sarif rust --minimumpriority 2
-messrust src github rust --ignore-violations-on-exit
-messrust src text path/to/custom-rules.xml --only ExcessiveMethodLength
-```
-
-`<paths>` is a comma-separated list of files or directories. Directories are
-searched recursively for `.rs` files. The analyser skips `.git`, `target`, and
-`node_modules`. The default ruleset is not implicit: pass `rust`, a component
-ruleset, or an XML file.
-
-## Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | No findings and no processing errors. |
-| `1` | A file or option error occurred. Errors take precedence. |
-| `2` | Findings exist and no processing error takes precedence. |
-
-`--ignore-errors-on-exit` removes errors from exit-code selection.
-`--ignore-violations-on-exit` removes findings from exit-code selection. These
-options do not remove errors or findings from reports.
-
-## Formats
-
-The available formats are `text`, `ansi`, `xml`, `json`, `html`, `github`,
-`gitlab`, `checkstyle`, and `sarif`. Structured formats include stable file,
-line, rule, priority, description, and suppression fields. Findings are sorted
-by file and source line. `--reportfile <path>` writes the report to a file and
-leaves standard output empty. `--color` colorizes text output.
-
-## Options
-
-| Option | Action |
-| --- | --- |
-| `--minimumpriority <n>` | Keep priorities `<= n`; `1` is highest. |
-| `--maximumpriority <n>` | Keep priorities `>= n`. |
-| `--reportfile <path>` | Write the report to a file. |
-| `--suffixes <ext[,ext...]>` | Replace the default `.rs` suffix list. |
-| `--exclude <text[,text...]>` | Skip paths containing a value. |
-| `--only <rules>` / `--enable <rules>` | Keep only named loaded rules. |
-| `--disable <rules>` | Remove named loaded rules. |
-| `--ignore-tests` | Skip test files, test directories, and `#[cfg(test)]` modules. |
-| `--strict` | Include findings suppressed by source comments. |
-| `--color` | Colorize text output. |
-| `--verbose`, `-v` | Print ruleset load diagnostics. |
-| `--ignore-errors-on-exit` | Ignore processing errors for exit-code selection. |
-| `--ignore-violations-on-exit` | Ignore findings for exit-code selection. |
-| `--help`, `-h` | Print command help. |
-| `--version` | Print the package version. |
-
-## Rulesets
-
-`rust` is the recommended ruleset. It combines the component rules and omits
-checks that commonly conflict with Rust idioms, such as short local names,
-terminal `else` expressions, and associated-function access.
-
-`opinionated` contains the stricter checks omitted from `rust`. Use
-`rust,opinionated` to run the complete policy. Use component rulesets when you
-need a smaller scope:
-
-| Ruleset | Scope |
-| --- | --- |
-| `rust` | Recommended Rust policy. |
-| `opinionated` | Opt-in checks omitted from the recommended policy. |
-| `codesize` | Complexity and size. |
-| `naming` | Identifier names. |
-| `unusedcode` | Unused declarations and values. |
-| `cleancode` | Clean-code checks. |
-| `design` | Design and coupling checks. |
-| `controversial` | PascalCase types and snake_case members. |
-
-Rulesets can be loaded from compatible PHPMD-style XML files. XML `ref`,
-`exclude`, rule properties, priorities, `--only`, `--enable`, and `--disable`
-are supported. Analysis remains syntax-only.
-
-## Source suppressions
-
-Use `messrust-` comments with one or more rule names. Names are not
-case-sensitive and can be separated by commas or spaces:
+## Suppress one intentional exception
 
 ```rust
 // messrust-disable-next-line LongVariable
 let deliberately_long_variable_name_for_a_fixture = 1;
-
-// messrust-disable ElseExpression, StaticAccess
-// ... a region with these findings suppressed ...
-// messrust-enable ElseExpression, StaticAccess
 ```
 
-`disable-next-line` suppresses the next physical source line. `disable` starts
-a region on the following line. `enable` ends the named suppressions. By
-default, suppressed findings are omitted. `--strict` includes them and marks
-them as `suppressed: true` in structured reports and `[suppressed]` in text.
+Region form: `messrust-disable` / `messrust-enable`. Names are case-insensitive.
+`--strict` keeps suppressed findings visible in the report.
 
-## CI
-
-The project CI runs tests, builds the release binary, and analyses the project
-with the default policy:
+## Drop it into CI
 
 ```yaml
-- run: cargo test --all-targets --locked
-- run: cargo build --release --locked
-- run: ./target/release/messrust src text rust --ignore-tests
+# GitHub Actions
+- run: cargo install messrust --locked
+- run: messrust src github rust --ignore-tests
 ```
 
-The self-analysis step has no baseline and no violation-ignore option. A
-finding fails CI with exit code `2`.
-
-## Mutation testing
-
-Install the released mutation tool, the coverage helper, and the LLVM tools
-component:
-
-```text
-cargo install mutarust --locked --version 0.1.2
-cargo install cargo-llvm-cov --locked
-rustup component add llvm-tools-preview
+```yaml
+# GitLab Code Quality
+script: messrust src gitlab rust --reportfile gl-code-quality-report.json
+artifacts:
+  reports:
+    codequality: gl-code-quality-report.json
 ```
 
-The committed policy file is `mutarust.yml`. It sets `min_msi: 75` and
-`min_covered_msi: 80`. These thresholds do not move down.
+This repository also self-checks after building the release binary. A finding
+fails the job with exit code `2`.
 
-CI runs the gate in two modes. On a pull request, the workflow mutates only the
-changed production lines. On a push to `main`, it mutates all production source.
-A green pull-request job does not prove the whole-crate score. Only the job on
-`main` measures that number.
+## Maintainers
 
-The selected target is `.`. `mutarust --list-files .` lists every production
-source file under `src`.
+Command reference and report formats: [docs/usage.md](docs/usage.md).
 
-Measure the whole crate with the same thresholds as the CI gate. Skip the
-packaging smoke test so each mutant does not run `cargo install`. Use
-`--workers 1` on machines with 16 GB RAM or less — the default worker count
-matches the CPU count, and each worker runs a full `cargo test` compilation.
-Without the cap, peak memory can exceed physical RAM and freeze the system:
+Mutation measurement uses `mutarust` with the committed `mutarust.yml` policy
+(`min_msi: 75`, `min_covered_msi: 80`). Thresholds do not move down. On machines
+with 16 GB RAM or less, cap workers and compile jobs:
 
-```text
+```console
 CARGO_BUILD_JOBS=4 mutarust --config mutarust.yml --coverage --workers 1 \
   --min-msi 75 --min-covered-msi 80 \
   --test-flags "-- --skip pack_install_smoke" .
 ```
 
-Measure one module with the same options and a file target:
+On macOS, point `TMPDIR` at a real path under `$HOME` before a coverage run so
+LCOV paths resolve correctly.
 
-```text
-CARGO_BUILD_JOBS=4 mutarust --config mutarust.yml --coverage --workers 1 \
-  --min-msi 75 --min-covered-msi 80 \
-  --test-flags "-- --skip pack_install_smoke" src/main.rs
-```
+Development checks:
 
-On machines with 32 GB RAM or more, `--workers 2` is safe and halves the wall
-time.
-
-On macOS, set `TMPDIR` to a real path under your home directory before a
-coverage run. The default temporary path under `/var/folders` resolves through
-the `/private/var` symlink. `mutarust` 0.1.2 then drops every LCOV path and
-marks all mutants as not covered:
-
-```text
-mkdir -p "$HOME/tmp/mutarust-run"
-export TMPDIR="$HOME/tmp/mutarust-run"
-```
-
-## Development
-
-Run the complete verification suite with:
-
-```text
+```console
 cargo test --all-targets --locked
 ```

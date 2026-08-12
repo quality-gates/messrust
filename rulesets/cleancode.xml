@@ -8,7 +8,7 @@
 
     <description>
 The Clean Code ruleset contains rules that enforce a clean code base. This includes rules from SOLID and object calisthenics.
-Adapted to Rust control-flow and expression idioms; see docs/cleancode-adaptations.md.
+Rust behavior: docs/cleancode.md.
     </description>
 
     <rule name="BooleanArgumentFlag"

@@ -8,6 +8,7 @@
 
     <description>
 The Code Size Ruleset contains a collection of rules that find code size related problems.
+Rust behavior: docs/codesize.md.
     </description>
 
     <rule name="CyclomaticComplexity"

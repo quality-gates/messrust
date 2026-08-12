@@ -8,7 +8,7 @@
 
     <description>
 The Design Ruleset contains a collection of rules that find software design related problems.
-Adapted to Rust idioms; see docs/design-adaptations.md.
+Rust behavior: docs/design.md.
     </description>
 
     <rule name="ExitExpression"
