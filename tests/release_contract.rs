@@ -119,8 +119,8 @@ fn release_workflow_keeps_the_protected_tap_dispatch_contract() {
     let workflow = include_str!("../.github/workflows/release.yml");
     let required_contract = [
         "environment: homebrew",
-        "validate-source-release@92b635fe61fb926a5b13c7c59f163c3cec3ca756",
-        "publish-source-release@92b635fe61fb926a5b13c7c59f163c3cec3ca756",
+        "validate-source-release@0076a679dc5f6ee0ef6e28f571b24fc3ec973ae2",
+        "publish-source-release@0076a679dc5f6ee0ef6e28f571b24fc3ec973ae2",
         "tool: messrust",
         "github-token: ${{ github.token }}",
         "tap-app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}",
