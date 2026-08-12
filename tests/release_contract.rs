@@ -119,20 +119,12 @@ fn release_workflow_keeps_the_protected_tap_dispatch_contract() {
     let workflow = include_str!("../.github/workflows/release.yml");
     let required_contract = [
         "environment: homebrew",
-        "actions/create-github-app-token@",
-        "repositories: homebrew-tap",
-        "permission-actions: write",
-        "actions/workflows/publish-formula.yml/dispatches",
-        "-f ref=main",
-        "inputs[tool]=messrust",
-        "inputs[tag]",
-        "inputs[version]",
-        "inputs[release_id]",
-        "inputs[source_sha]",
-        "inputs[arm64_asset]",
-        "inputs[amd64_asset]",
-        "inputs[arm64_sha]",
-        "inputs[amd64_sha]",
+        "validate-source-release@92b635fe61fb926a5b13c7c59f163c3cec3ca756",
+        "publish-source-release@92b635fe61fb926a5b13c7c59f163c3cec3ca756",
+        "tool: messrust",
+        "github-token: ${{ github.token }}",
+        "tap-app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}",
+        "tap-app-private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}",
     ];
 
     for contract_item in required_contract {
