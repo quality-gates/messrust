@@ -7,16 +7,14 @@
          xsi:noNamespaceSchemaLocation="http://pmd.sf.net/ruleset_xml_schema.xsd">
 
     <description>
-This ruleset contains controversial naming checks adapted to Rust idioms.
-phpmd CamelCase rule names are kept for catalog compatibility; types use
-PascalCase and functions/fields/parameters/locals use snake_case.
-See docs/controversial-adaptations.md.
+This ruleset checks Rust style names under historical CamelCase rule ids.
+Types use PascalCase; functions, fields, parameters, and locals use snake_case.
+See docs/controversial.md.
     </description>
 
     <!--
-    Superglobals is omitted: Rust has no PHP $_GET / $_POST analog.
-    Keeping a quiet identity rule would invent PHP noise; see
-    docs/controversial-adaptations.md.
+    Superglobals is omitted: Rust has no request-superglobal analog.
+    See docs/controversial.md.
     -->
 
     <rule name="CamelCaseClassName"
