@@ -123,23 +123,31 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
+        let prev = self.in_trait_impl;
         self.in_trait_impl = node.trait_.is_some();
         syn::visit::visit_item_impl(self, node);
+        self.in_trait_impl = prev;
     }
 
     fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
+        let prev = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_struct(self, node);
+        self.derived_fields_are_used = prev;
     }
 
     fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
+        let prev = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_enum(self, node);
+        self.derived_fields_are_used = prev;
     }
 
     fn visit_item_union(&mut self, node: &'ast ItemUnion) {
+        let prev = self.derived_fields_are_used;
         self.derived_fields_are_used = derive_uses_fields(&node.attrs);
         syn::visit::visit_item_union(self, node);
+        self.derived_fields_are_used = prev;
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
@@ -350,6 +358,9 @@ pub(crate) fn is_format_macro(node: &syn::Macro) -> bool {
             | "debug_assert"
             | "debug_assert_eq"
             | "debug_assert_ne"
+            | "todo"
+            | "unimplemented"
+            | "unreachable"
     )
 }
 

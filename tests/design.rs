@@ -1077,3 +1077,48 @@ fn lack_of_cohesion_honours_custom_maximum_at_boundary() {
         "The Server has a Lack of Cohesion Of Methods (LCOM4) value of 3. Consider to split this class into 3 smaller classes.",
     );
 }
+
+#[test]
+fn global_variable_allows_static_mut_used_as_index_in_assignment_lhs() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "index_lhs.rs",
+        r#"
+static mut ARR: [i32; 4] = [0; 4];
+static mut IDX: usize = 0;
+fn run() {
+    unsafe {
+        ARR[IDX] = 42;
+    }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ARR"), "ARR must be reported: stdout={out:?}");
+    assert!(!out.contains("IDX"), "IDX must not be reported as mutated: stdout={out:?}");
+}
+
+#[test]
+fn lack_of_cohesion_links_through_tuple_field_access() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "tuple_cohesion.rs",
+        r#"
+struct Pair(i32, i32);
+impl Pair {
+    fn get_first(&self) -> i32 {
+        self.0
+    }
+    fn work(&mut self) {
+        self.0 += 1;
+        self.1 += 1;
+    }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}

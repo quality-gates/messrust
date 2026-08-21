@@ -22,9 +22,18 @@ pub(crate) fn count_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::toke
         .iter()
         .filter(|arg| match arg {
             FnArg::Receiver(_) => false,
-            FnArg::Typed(PatType { pat, .. }) => !matches!(**pat, Pat::Wild(_)),
+            FnArg::Typed(PatType { pat, .. }) => {
+                !matches!(**pat, Pat::Wild(_)) && !is_self_pat(pat)
+            }
         })
         .count()
+}
+
+fn is_self_pat(pat: &Pat) -> bool {
+    match pat {
+        Pat::Ident(id) => id.ident == "self",
+        _ => false,
+    }
 }
 
 

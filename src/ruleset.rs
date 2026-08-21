@@ -33,6 +33,7 @@ impl Default for LoadOptions {
     }
 }
 
+#[derive(Clone)]
 struct XmlRule {
     name: String,
     class: String,
@@ -150,11 +151,9 @@ fn add_ref(
         src.name.clone()
     };
     if !rule_name.is_empty() {
-        add_named_rule(out, &src, &src_name, &rule_name, xr, opts, warn);
-        return Ok(());
+        return add_named_rule(out, &src, &src_name, &rule_name, xr, opts, warn);
     }
-    add_ruleset_rules(out, &src, &src_name, xr, opts, warn);
-    Ok(())
+    add_ruleset_rules(out, &src, &src_name, xr, opts, warn)
 }
 
 fn read_referenced_ruleset(
@@ -171,6 +170,37 @@ fn read_referenced_ruleset(
     }
 }
 
+fn merge_override_rule(source: &XmlRule, override_rule: &XmlRule) -> XmlRule {
+    let mut merged = source.clone();
+    if merged.priority.is_none() {
+        merged.priority = override_rule.priority;
+    }
+    for (k, v) in &override_rule.properties {
+        merged.properties.insert(k.clone(), v.clone());
+    }
+    if !override_rule.message.is_empty() {
+        merged.message = override_rule.message.clone();
+    }
+    merged
+}
+
+fn rule_name_or_ref(rule: &XmlRule) -> &str {
+    if !rule.name.is_empty() {
+        &rule.name
+    } else if let Some((_, name)) = rule.ref_path.split_once('/') {
+        name
+    } else {
+        &rule.ref_path
+    }
+}
+
+fn find_source_rule<'a>(source: &'a XmlRuleset, rule_name: &str) -> Option<&'a XmlRule> {
+    source
+        .rules
+        .iter()
+        .find(|rule| rule_name_or_ref(rule) == rule_name)
+}
+
 fn add_named_rule(
     out: &mut Vec<LoadedRule>,
     source: &XmlRuleset,
@@ -179,13 +209,31 @@ fn add_named_rule(
     override_rule: &XmlRule,
     opts: &LoadOptions,
     warn: &mut dyn FnMut(String),
-) {
-    let Some(source_rule) = source.rules.iter().find(|rule| rule.name == rule_name) else {
-        return;
+) -> Result<(), String> {
+    let Some(source_rule) = find_source_rule(source, rule_name) else {
+        return Ok(());
     };
+    if !source_rule.ref_path.is_empty() {
+        let merged = merge_override_rule(source_rule, override_rule);
+        return add_ref(out, &merged, opts, warn);
+    }
     if let Some(rule) = build_rule(source_name, source_rule, override_rule, opts, warn) {
         out.push(rule);
     }
+    Ok(())
+}
+
+fn merge_ruleset_override(source: &XmlRule, override_rule: &XmlRule) -> XmlRule {
+    let mut merged = source.clone();
+    for ex in &override_rule.excludes {
+        if !merged.excludes.contains(ex) {
+            merged.excludes.push(ex.clone());
+        }
+    }
+    if merged.priority.is_none() {
+        merged.priority = override_rule.priority;
+    }
+    merged
 }
 
 fn add_ruleset_rules(
@@ -195,16 +243,23 @@ fn add_ruleset_rules(
     override_rule: &XmlRule,
     opts: &LoadOptions,
     warn: &mut dyn FnMut(String),
-) {
+) -> Result<(), String> {
     let excluded: HashSet<&str> = override_rule.excludes.iter().map(String::as_str).collect();
     for source_rule in &source.rules {
-        if source_rule.class.is_empty() || excluded.contains(source_rule.name.as_str()) {
+        let name = rule_name_or_ref(source_rule);
+        if !name.is_empty() && excluded.contains(name) {
             continue;
         }
-        if let Some(rule) = build_rule(source_name, source_rule, source_rule, opts, warn) {
-            out.push(rule);
+        if !source_rule.ref_path.is_empty() {
+            let merged = merge_ruleset_override(source_rule, override_rule);
+            add_ref(out, &merged, opts, warn)?;
+        } else if !source_rule.class.is_empty() {
+            if let Some(rule) = build_rule(source_name, source_rule, source_rule, opts, warn) {
+                out.push(rule);
+            }
         }
     }
+    Ok(())
 }
 
 fn build_rule(

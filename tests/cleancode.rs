@@ -590,3 +590,33 @@ fn static_access_prefers_rightmost_pascal_receiver() {
         "Avoid using static access to class 'Helper' in method 'run'.",
     );
 }
+
+#[test]
+fn duplicated_array_key_reports_duplicate_in_nested_struct_literal() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested_dup.rs",
+        r#"
+struct Inner { a: i32 }
+struct Outer { inner: Inner }
+fn make() -> Outer {
+    Outer {
+        inner: Inner {
+            a: 1,
+            a: 2,
+        },
+    }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "DuplicatedArrayKey");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        8,
+        "DuplicatedArrayKey",
+        "Duplicated array key a, first declared at line 7.",
+    );
+}

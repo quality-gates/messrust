@@ -757,3 +757,57 @@ fn unused_private_method_counts_call_from_different_impl_item() {
     );
     assert!(!out.contains("kept_method"), "stdout={out:?}");
 }
+
+#[test]
+fn unused_private_method_reports_private_method_in_inherent_impl_after_trait_impl() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "after_trait.rs",
+        r#"
+trait MyTrait {
+    fn trait_fn(&self);
+}
+struct S;
+impl MyTrait for S {
+    fn trait_fn(&self) {}
+}
+struct Other;
+impl Other {
+    fn uncalled_private(&self) {}
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedPrivateMethod");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        11,
+        "UnusedPrivateMethod",
+        "Avoid unused private methods such as 'uncalled_private'.",
+    );
+}
+
+#[test]
+fn unused_local_variable_counts_todo_and_unreachable_format_capture() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "todo_capture.rs",
+        r#"
+fn work() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    if a > 0 {
+        todo!("{b}");
+    } else {
+        unreachable!("{c}");
+    }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}

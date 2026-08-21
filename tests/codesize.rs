@@ -1222,3 +1222,16 @@ fn excessive_class_complexity_quiet_at_forty_nine() {
     let (code, out, err) = run_only(&path, "ExcessiveClassComplexity");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
+
+#[test]
+fn excessive_parameter_list_skips_typed_self_receiver() {
+    let dir = TempDir::new().unwrap();
+    let params: Vec<String> = (0..9).map(|i| format!("p{i}: i32")).collect();
+    let path = write_file(
+        dir.path(),
+        "typed_self.rs",
+        &format!("struct S;\nimpl S {{\n    fn method(self: &Self, {}) {{}}\n}}\n", params.join(", ")),
+    );
+    let (code, out, err) = run_only(&path, "ExcessiveParameterList");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}

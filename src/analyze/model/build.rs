@@ -42,6 +42,7 @@ impl<'ast> Visit<'ast> for DuplicateKeyCollector {
                 seen.insert(name, line);
             }
         }
+        syn::visit::visit_expr_struct(self, node);
     }
 }
 
@@ -491,7 +492,6 @@ pub(crate) fn is_builtin_type(name: &str) -> bool {
 pub(crate) struct StaticMutCollector {
     pub(crate) static_muts: Vec<NamedSite>,
     pub(crate) mutated: HashSet<String>,
-    pub(crate) assign_lhs: bool,
 }
 
 
@@ -505,19 +505,9 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
         }
     }
 
-    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
-        if self.assign_lhs {
-            if let Some(ident) = path_single_ident(node) {
-                self.mutated.insert(ident);
-            }
-        }
-    }
-
     fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
-        self.assign_lhs = true;
-        self.visit_expr(&node.left);
-        self.assign_lhs = false;
-        self.visit_expr(&node.right);
+        collect_mutated_static_place(&node.left, &mut self.mutated);
+        syn::visit::visit_expr_assign(self, node);
     }
 
     fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
@@ -534,11 +524,27 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
                 | syn::BinOp::ShlAssign(_)
                 | syn::BinOp::ShrAssign(_)
         ) {
-            self.assign_lhs = true;
-            self.visit_expr(&node.left);
-            self.assign_lhs = false;
-            self.visit_expr(&node.right);
+            collect_mutated_static_place(&node.left, &mut self.mutated);
         }
+        syn::visit::visit_expr_binary(self, node);
+    }
+}
+
+
+fn collect_mutated_static_place(expr: &syn::Expr, mutated: &mut HashSet<String>) {
+    match expr {
+        syn::Expr::Path(p) => {
+            if let Some(ident) = path_single_ident(p) {
+                mutated.insert(ident);
+            }
+        }
+        syn::Expr::Field(f) => collect_mutated_static_place(&f.base, mutated),
+        syn::Expr::Index(i) => collect_mutated_static_place(&i.expr, mutated),
+        syn::Expr::Paren(p) => collect_mutated_static_place(&p.expr, mutated),
+        syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => {
+            collect_mutated_static_place(&u.expr, mutated)
+        }
+        _ => {}
     }
 }
 
