@@ -468,3 +468,22 @@ fn duplicate_rule_names_across_specs_are_deduplicated() {
         "stdout={out:?}"
     );
 }
+
+#[test]
+fn custom_ruleset_referencing_rust_ruleset_pulls_in_rules() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let xml = dir.path().join("ref_rust.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="RefRust">
+  <rule ref="rust"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}

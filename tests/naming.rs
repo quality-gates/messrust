@@ -1002,3 +1002,22 @@ fn get_flag() -> bool { true }
         "The 'get_flag()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
     );
 }
+
+#[test]
+fn boolean_get_method_name_reports_method_with_typed_self() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "get_typed_self.rs",
+        "struct Foo;\nimpl Foo {\n    fn get_active(self: &Self) -> bool { true }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "BooleanGetMethodName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "BooleanGetMethodName",
+        "The 'get_active()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+}

@@ -343,7 +343,7 @@ fn json_format_prints_exact_document_for_one_violation() {
     assert!(out.ends_with('\n'), "json must end with newline");
 
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["version"], "0.1.0");
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(v["package"], "messrust");
     assert_recent_timestamp(v["timestamp"].as_str().unwrap());
     assert_eq!(
@@ -378,7 +378,7 @@ fn json_format_empty_findings_is_skeleton_with_empty_files() {
     assert!(err.is_empty(), "stderr={err:?}");
     assert_four_space_json(&out);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["version"], "0.1.0");
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(v["package"], "messrust");
     assert_recent_timestamp(v["timestamp"].as_str().unwrap());
     assert_eq!(v["files"], json!([]));
@@ -506,7 +506,7 @@ fn sarif_format_prints_exact_document_for_one_violation() {
     assert_eq!(v["version"], "2.1.0");
     let run = &v["runs"][0];
     assert_eq!(run["tool"]["driver"]["name"], "messrust");
-    assert_eq!(run["tool"]["driver"]["version"], "0.1.0");
+    assert_eq!(run["tool"]["driver"]["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(
         run["tool"]["driver"]["rules"],
         json!([{
@@ -758,7 +758,10 @@ fn xml_format_empty_findings_is_shell_only() {
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
     assert!(out.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n"));
-    assert!(out.contains("<pmd version=\"0.1.0\" tool=\"messrust\" timestamp=\""));
+    assert!(out.contains(&format!(
+        "<pmd version=\"{}\" tool=\"messrust\" timestamp=\"",
+        env!("CARGO_PKG_VERSION")
+    )));
     assert!(out.ends_with("\">\n</pmd>\n") || out.contains("\">\n</pmd>\n"));
     assert!(!out.contains("<file "));
     assert!(!out.contains("<error "));
@@ -902,7 +905,8 @@ fn checkstyle_format_prints_exact_document() {
     assert!(err.is_empty(), "stderr={err:?}");
     let msg = param_list_message("entry_point", 11);
     let expected = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<checkstyle version=\"0.1.0\">\n  <file name=\"{file}\">\n    <error line=\"1\" column=\"1\" severity=\"warning\" message=\"{msg}\" source=\"Code Size Rules/ExcessiveParameterList\"/>\n  </file>\n</checkstyle>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<checkstyle version=\"{}\">\n  <file name=\"{file}\">\n    <error line=\"1\" column=\"1\" severity=\"warning\" message=\"{msg}\" source=\"Code Size Rules/ExcessiveParameterList\"/>\n  </file>\n</checkstyle>\n",
+        env!("CARGO_PKG_VERSION")
     );
     assert_eq!(out, expected);
 }
@@ -915,9 +919,10 @@ fn checkstyle_format_empty_findings_is_shell_only() {
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert_eq!(
         out,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<checkstyle version=\"0.1.0\">\n\
-</checkstyle>\n"
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<checkstyle version=\"{}\">\n</checkstyle>\n",
+            env!("CARGO_PKG_VERSION")
+        )
     );
 }
 
