@@ -152,6 +152,22 @@ fn space_separated_rules_suppress_each_named_rule() {
     assert_eq!(code, EXIT_SUCCESS, "space-separated rules should suppress");
 }
 
+#[test]
+fn active_rule_and_next_line_rule_overlap_on_the_finding_line() {
+    let dir = TempDir::new().unwrap();
+    let source = format!(
+        "// messrust-disable ExcessiveParameterList\n\
+         // messrust-disable-next-line ShortMethodName\n\
+         {}",
+        fixture_with_params(11).replacen("entry_point", "ab", 1)
+    );
+    let path = write_file(dir.path(), "fixture.rs", &source);
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize,naming"]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+}
+
 // ---------------------------------------------------------------------------
 // invalid directive forms
 // ---------------------------------------------------------------------------

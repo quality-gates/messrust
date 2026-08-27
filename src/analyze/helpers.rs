@@ -3,16 +3,15 @@
 use regex::Regex;
 use syn::Visibility;
 
-use crate::metrics::effective_lines_of_code;
 use crate::report::Violation;
 use crate::ruleset::LoadedRule;
 
 use super::model::{FileModel, FnModel, TypeModel};
 
 
-pub(crate) fn fn_loc(f: &FnModel<'_>, src: &str, ignore_ws: bool) -> usize {
+pub(crate) fn fn_loc(f: &FnModel<'_>, model: &FileModel<'_>, ignore_ws: bool) -> usize {
     if ignore_ws {
-        effective_lines_of_code(src, f.begin_line, f.end_line)
+        model.effective_lines.count(f.begin_line, f.end_line)
     } else {
         f.end_line.saturating_sub(f.begin_line).saturating_add(1)
     }
@@ -21,13 +20,13 @@ pub(crate) fn fn_loc(f: &FnModel<'_>, src: &str, ignore_ws: bool) -> usize {
 
 pub(crate) fn type_loc(t: &TypeModel<'_>, model: &FileModel<'_>, ignore_ws: bool) -> usize {
     let mut loc = if ignore_ws {
-        effective_lines_of_code(model.src, t.begin_line, t.end_line)
+        model.effective_lines.count(t.begin_line, t.end_line)
     } else {
         t.end_line.saturating_sub(t.begin_line).saturating_add(1)
     };
     for m in &t.methods {
         loc += if ignore_ws {
-            effective_lines_of_code(model.src, m.begin_line, m.end_line)
+            model.effective_lines.count(m.begin_line, m.end_line)
         } else {
             m.end_line.saturating_sub(m.begin_line).saturating_add(1)
         };
@@ -286,4 +285,3 @@ pub(crate) fn is_private(vis: &Visibility) -> bool {
 pub(crate) fn is_rust_unused_name(name: &str) -> bool {
     name.starts_with('_')
 }
-

@@ -101,7 +101,7 @@ pub(crate) fn apply_excessive_method_length(
     let threshold = property_usize(rule, "minimum", DEFAULT_METHOD_LOC);
     let ignore_ws = property_bool(rule, "ignore-whitespace", false);
     for f in &model.functions {
-        let value = fn_loc(f, model.src, ignore_ws);
+        let value = fn_loc(f, model, ignore_ws);
         if value >= threshold {
             out.push(func_violation(
                 rule,
@@ -341,4 +341,3 @@ pub(crate) fn apply_excessive_class_complexity(
         }
     }
 }
-
