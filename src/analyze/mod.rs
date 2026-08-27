@@ -11,14 +11,22 @@ pub use kind::RuleKind;
 use syn::spanned::Spanned;
 use syn::Item;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_RANGE_COMPARISONS: Cell<usize> = const { Cell::new(0) };
+}
+
 use crate::report::{ProcessingError, Report, Violation};
 use crate::ruleset::LoadedRule;
 use crate::suppressions::Suppressions;
 
 use self::model::FileModel;
+use self::rules::cleancode::*;
 use self::rules::codesize::*;
 use self::rules::controversial::*;
-use self::rules::cleancode::*;
 use self::rules::design::*;
 use self::rules::naming::*;
 use self::rules::unusedcode::*;
@@ -63,11 +71,7 @@ pub(crate) fn analyze_one(
     }
     if ignore_tests {
         let test_modules = test_module_ranges(&file);
-        violations.retain(|violation| {
-            !test_modules
-                .iter()
-                .any(|(start, end)| (*start..=*end).contains(&violation.begin_line))
-        });
+        violations.retain(|violation| !test_modules.contains(violation.begin_line));
     }
     let suppressions = Suppressions::from_source(&src);
     violations.retain_mut(|violation| {
@@ -85,10 +89,40 @@ pub(crate) fn analyze_one(
 }
 
 
-pub(crate) fn test_module_ranges(file: &syn::File) -> Vec<(usize, usize)> {
+pub(crate) struct TestModuleRanges {
+    ranges: Vec<(usize, usize)>,
+}
+
+impl TestModuleRanges {
+    fn new(mut ranges: Vec<(usize, usize)>) -> Self {
+        ranges.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+        for (start, end) in ranges {
+            if let Some((_, previous_end)) = merged.last_mut() {
+                if start <= *previous_end {
+                    *previous_end = (*previous_end).max(end);
+                    continue;
+                }
+            }
+            merged.push((start, end));
+        }
+        Self { ranges: merged }
+    }
+
+    fn contains(&self, line: usize) -> bool {
+        let index = self.ranges.partition_point(|(start, _)| {
+            #[cfg(test)]
+            TEST_RANGE_COMPARISONS.with(|comparisons| comparisons.set(comparisons.get() + 1));
+            *start <= line
+        });
+        index > 0 && self.ranges[index - 1].1 >= line
+    }
+}
+
+pub(crate) fn test_module_ranges(file: &syn::File) -> TestModuleRanges {
     let mut ranges = Vec::new();
     collect_test_module_ranges(&file.items, &mut ranges);
-    ranges
+    TestModuleRanges::new(ranges)
 }
 
 
@@ -165,7 +199,33 @@ pub(crate) const RULE_HANDLERS: &[RuleHandler] = &[
 ];
 
 
-pub(crate) fn apply_rule(rule: &LoadedRule, file: &str, model: &FileModel<'_>, out: &mut Vec<Violation>) {
+pub(crate) fn apply_rule(
+    rule: &LoadedRule,
+    file: &str,
+    model: &FileModel<'_>,
+    out: &mut Vec<Violation>,
+) {
     RULE_HANDLERS[rule.kind as usize](rule, file, model, out);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn many_production_findings_use_logarithmic_range_queries() {
+        let count = 4_096;
+        let ranges = (0..count)
+            .map(|index| (10_000 + index * 2, 10_000 + index * 2))
+            .collect();
+        let test_modules = TestModuleRanges::new(ranges);
+        TEST_RANGE_COMPARISONS.with(|comparisons| comparisons.set(0));
+
+        for line in 1..=count {
+            assert!(!test_modules.contains(line));
+        }
+
+        let comparisons = TEST_RANGE_COMPARISONS.with(Cell::get);
+        assert!(comparisons < count * 20, "comparisons: {comparisons}");
+    }
+}
