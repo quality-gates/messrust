@@ -14,6 +14,15 @@
 use syn::visit::Visit;
 use syn::{BinOp, Block, Expr, ExprIf, Pat, Stmt};
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static EFFECTIVE_LINE_SCANS: Cell<usize> = const { Cell::new(0) };
+    static EFFECTIVE_LINE_QUERIES: Cell<usize> = const { Cell::new(0) };
+}
+
 /// Cyclomatic complexity: base 1 + one per decision point.
 pub fn cyclomatic_complexity(body: Option<&Block>) -> usize {
     let Some(body) = body else {
@@ -194,25 +203,36 @@ impl<'ast> Visit<'ast> for BoolOpVisitor {
     }
 }
 
-/// Effective lines of code: skip blank and comment-only lines (PHPMD `eloc`).
-pub fn effective_lines_of_code(src: &str, start_line: usize, end_line: usize) -> usize {
+pub(crate) fn effective_line_prefix(src: &str) -> Vec<usize> {
+    let mut prefix = Vec::new();
+    prefix.push(0);
+    let mut count = 0usize;
+    let mut in_block = false;
+    for raw in src.split('\n') {
+        #[cfg(test)]
+        EFFECTIVE_LINE_SCANS.with(|scans| scans.set(scans.get() + 1));
+        let (has_code, after) = line_has_code(raw, in_block);
+        in_block = after;
+        if has_code {
+            count += 1;
+        }
+        prefix.push(count);
+    }
+    prefix
+}
+
+pub(crate) fn effective_line_count(prefix: &[usize], start_line: usize, end_line: usize) -> usize {
+    #[cfg(test)]
+    EFFECTIVE_LINE_QUERIES.with(|queries| queries.set(queries.get() + 1));
     if start_line == 0 || end_line < start_line {
         return 0;
     }
-    let mut count = 0usize;
-    let mut in_block = false;
-    for (idx, raw) in src.split('\n').enumerate() {
-        let line_no = idx + 1;
-        if line_no > end_line {
-            break;
-        }
-        let (has_code, after) = line_has_code(raw, in_block);
-        in_block = after;
-        if line_no >= start_line && has_code {
-            count += 1;
-        }
+    let last_line = prefix.len().saturating_sub(1);
+    let end = end_line.min(last_line);
+    if start_line > end {
+        return 0;
     }
-    count
+    prefix[end].saturating_sub(prefix[start_line - 1])
 }
 
 fn line_has_code(line: &str, in_block: bool) -> (bool, bool) {
@@ -252,4 +272,28 @@ fn scan_visible_line(line: &str) -> (bool, bool) {
 fn contains_code(text: &str) -> bool {
     text.bytes()
         .any(|byte| !matches!(byte, b' ' | b'\t' | b'\r'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn many_one_line_spans_scan_the_source_once() {
+        let line_count = 4_000;
+        let source = (0..line_count)
+            .map(|index| format!("fn function_{index}() {{}}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        EFFECTIVE_LINE_SCANS.with(|scans| scans.set(0));
+        EFFECTIVE_LINE_QUERIES.with(|queries| queries.set(0));
+
+        let prefix = effective_line_prefix(&source);
+        for line in 1..=line_count {
+            assert_eq!(effective_line_count(&prefix, line, line), 1);
+        }
+
+        assert_eq!(EFFECTIVE_LINE_SCANS.with(Cell::get), line_count);
+        assert_eq!(EFFECTIVE_LINE_QUERIES.with(Cell::get), line_count);
+    }
 }

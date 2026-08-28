@@ -292,10 +292,10 @@ pub(crate) fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>)
     for field in &t.fields {
         add_type_dependencies(&mut deps, &field.type_names, &t.name);
     }
-    for f in &model.functions {
-        if !f.counts_for_type_metrics || f.parent.as_deref() != Some(t.name.as_str()) {
-            continue;
-        }
+    for f in model
+        .metric_functions
+        .for_parent(&model.functions, &t.name)
+    {
         add_type_dependencies(&mut deps, &f.dep_types, &t.name);
     }
     deps.len()
@@ -526,4 +526,3 @@ impl<'ast> Visit<'ast> for ReceiverUseCollector<'_> {
     fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
     fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
 }
-

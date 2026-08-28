@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use messrust::{run, EXIT_ERROR, EXIT_SUCCESS, EXIT_VIOLATION};
 use tempfile::TempDir;
@@ -325,6 +326,29 @@ fn ref_to_a_ruleset_with_an_exclude_missing_name_attribute_is_ignored() {
 }
 
 #[test]
+fn full_ruleset_reference_keeps_named_excludes() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let xml = dir.path().join("exclude.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Exclude">
+  <rule ref="codesize">
+    <exclude name="ExcessiveParameterList"/>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
 fn unknown_ruleset_name_reports_a_clear_error() {
     // read_ruleset: an identifier that matches neither a builtin name nor a
     // file on disk must fail with a clear message naming the bad spec.
@@ -455,11 +479,7 @@ fn duplicate_rule_names_across_specs_are_deduplicated() {
 "#,
     )
     .unwrap();
-    let spec = format!(
-        "{},{}",
-        first.to_str().unwrap(),
-        second.to_str().unwrap()
-    );
+    let spec = format!("{},{}", first.to_str().unwrap(), second.to_str().unwrap());
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", &spec]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert_eq!(
@@ -486,4 +506,429 @@ fn custom_ruleset_referencing_rust_ruleset_pulls_in_rules() {
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn self_referencing_ruleset_reports_the_reference_chain() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let ruleset = dir.path().join("self.xml");
+    fs::write(
+        &ruleset,
+        format!(
+            r#"<ruleset name="Self">
+  <rule ref="{}"/>
+</ruleset>
+"#,
+            ruleset.display()
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_messrust"))
+        .args([source.to_str().unwrap(), "text", ruleset.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(EXIT_ERROR), "stderr={stderr:?}");
+    assert!(
+        stderr.contains("ruleset reference cycle"),
+        "stderr={stderr:?}"
+    );
+    assert!(
+        stderr.matches(ruleset.to_str().unwrap()).count() >= 2,
+        "stderr={stderr:?}"
+    );
+}
+
+#[test]
+fn two_file_ruleset_cycle_reports_the_reference_chain() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let first = dir.path().join("first.xml");
+    let second = dir.path().join("second.xml");
+    fs::write(
+        &first,
+        format!(
+            r#"<ruleset name="First">
+  <rule ref="{}"/>
+</ruleset>
+"#,
+            second.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &second,
+        format!(
+            r#"<ruleset name="Second">
+  <rule ref="{}"/>
+</ruleset>
+"#,
+            first.display()
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_messrust"))
+        .args([source.to_str().unwrap(), "text", first.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(EXIT_ERROR), "stderr={stderr:?}");
+    assert!(
+        stderr.contains("ruleset reference cycle"),
+        "stderr={stderr:?}"
+    );
+    assert!(
+        stderr.contains(first.to_str().unwrap()),
+        "stderr={stderr:?}"
+    );
+    assert!(
+        stderr.contains(second.to_str().unwrap()),
+        "stderr={stderr:?}"
+    );
+}
+
+#[test]
+fn self_named_reference_to_a_direct_rule_is_valid() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "fixture.rs", &fixture_with_params(6));
+    let ruleset = dir.path().join("self_named.xml");
+    fs::write(
+        &ruleset,
+        format!(
+            r#"<ruleset name="SelfNamed">
+  <rule ref="{}/ExcessiveParameterList">
+    <properties>
+      <property name="minimum" value="5"/>
+    </properties>
+  </rule>
+  <rule name="ExcessiveParameterList" class="PHPMD\Rule\Design\LongParameterList"/>
+</ruleset>
+"#,
+            ruleset.display()
+        ),
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", ruleset.to_str().unwrap()]);
+
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+}
+
+#[test]
+fn nested_named_references_keep_override_precedence() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "fixture.rs", &fixture_with_params(6));
+    let middle = dir.path().join("middle.xml");
+    let outer = dir.path().join("outer.xml");
+    fs::write(
+        &middle,
+        r#"<ruleset name="Middle">
+  <rule ref="codesize/ExcessiveParameterList" message="Middle {0}">
+    <priority>2</priority>
+    <properties><property name="minimum" value="7"/></properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &outer,
+        format!(
+            r#"<ruleset name="Outer">
+  <rule ref="{}/ExcessiveParameterList" message="Outer {{2}}">
+    <priority>1</priority>
+    <properties><property name="minimum" value="5"/></properties>
+  </rule>
+</ruleset>
+"#,
+            middle.display()
+        ),
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "json", outer.to_str().unwrap()]);
+
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("\"priority\": 2"), "stdout={out:?}");
+    assert!(out.contains("Outer 6"), "stdout={out:?}");
+}
+
+fn write_repeated_diamond(dir: &Path, depth: usize, leaf: &str) -> PathBuf {
+    for index in 0..depth {
+        let current = dir.join(format!("node-{index}.xml"));
+        let next = if index + 1 == depth {
+            leaf.to_string()
+        } else {
+            dir.join(format!("node-{}.xml", index + 1))
+                .display()
+                .to_string()
+        };
+        fs::write(
+            current,
+            format!(
+                r#"<ruleset name="Node {index}">
+  <rule ref="missing-ruleset-{index}"/>
+  <rule ref="{next}"><exclude name="DummyLeft{index}"/></rule>
+  <rule ref="{next}"><exclude name="DummyRight{index}"/></rule>
+</ruleset>
+"#,
+            ),
+        )
+        .unwrap();
+    }
+
+    dir.join("node-0.xml")
+}
+
+fn write_relevant_diamond(dir: &Path, depth: usize, leaf: &str, override_xml: &str) -> PathBuf {
+    for index in 0..depth {
+        let current = dir.join(format!("relevant-{index}.xml"));
+        let next = if index + 1 == depth {
+            leaf.to_string()
+        } else {
+            dir.join(format!("relevant-{}.xml", index + 1))
+                .display()
+                .to_string()
+        };
+        fs::write(
+            current,
+            format!(
+                "<ruleset name=\"Relevant {index}\">\n\
+                 <rule ref=\"missing-relevant-{index}\"/>\n\
+                 <rule ref=\"{next}\">{override_xml}</rule>\n\
+                 <rule ref=\"{next}\">{override_xml}</rule>\n\
+                 </ruleset>\n"
+            ),
+        )
+        .unwrap();
+    }
+    dir.join("relevant-0.xml")
+}
+
+#[test]
+fn repeated_excluded_diamond_expands_each_ruleset_once() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let depth = 9;
+    let first = write_repeated_diamond(dir.path(), depth, "codesize");
+
+    let root = dir.path().join("root.xml");
+    fs::write(
+        &root,
+        format!(
+            r#"<ruleset name="Root">
+  <rule ref="{}">
+    <exclude name="ExcessiveParameterList"/>
+  </rule>
+</ruleset>
+"#,
+            first.display()
+        ),
+    )
+    .unwrap();
+
+    let (code, _out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        root.to_str().unwrap(),
+        "--verbose",
+    ]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert_eq!(
+        err.matches("Cannot resolve ref").count(),
+        depth,
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn repeated_priority_filtered_diamond_expands_each_ruleset_once() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let depth = 9;
+    let first = write_repeated_diamond(dir.path(), depth, "codesize/ExcessiveParameterList");
+    let root = dir.path().join("root.xml");
+    fs::write(
+        &root,
+        format!(
+            r#"<ruleset name="Root">
+  <rule ref="{}"><priority>5</priority></rule>
+</ruleset>
+"#,
+            first.display()
+        ),
+    )
+    .unwrap();
+
+    let (code, _out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        root.to_str().unwrap(),
+        "--minimumpriority",
+        "3",
+        "--verbose",
+    ]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert_eq!(
+        err.matches("Cannot resolve ref").count(),
+        depth,
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn relevant_exclusion_diamond_expands_each_ruleset_once() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let leaf = write_file(
+        dir.path(),
+        "blocked.xml",
+        "<ruleset name=\"Blocked\"><rule name=\"Blocked\" class=\"PHPMD\\Rule\\Design\\LongParameterList\"/></ruleset>\n",
+    );
+    let depth = 14;
+    let first = write_relevant_diamond(
+        dir.path(),
+        depth,
+        leaf.to_str().unwrap(),
+        "<exclude name=\"Blocked\"/>",
+    );
+
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        first.to_str().unwrap(),
+        "--verbose",
+    ]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!(err.matches("Cannot resolve ref").count(), depth);
+}
+
+#[test]
+fn relevant_priority_diamond_expands_each_ruleset_once() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let depth = 14;
+    let first = write_relevant_diamond(
+        dir.path(),
+        depth,
+        "codesize/ExcessiveParameterList",
+        "<priority>5</priority>",
+    );
+
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        first.to_str().unwrap(),
+        "--minimumpriority",
+        "3",
+        "--verbose",
+    ]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!(err.matches("Cannot resolve ref").count(), depth);
+}
+
+#[test]
+fn deep_chain_shares_many_blocked_rules() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "clean.rs", "fn entry_point() {}\n");
+    let rule_count = 200;
+    let mut leaf_xml = String::from("<ruleset name=\"Leaf\">\n");
+    for index in 0..rule_count {
+        leaf_xml.push_str(&format!(
+            "  <rule name=\"Blocked{index}\" class=\"PHPMD\\Rule\\Design\\LongParameterList\"/>\n"
+        ));
+    }
+    leaf_xml.push_str("</ruleset>\n");
+    let leaf = write_file(dir.path(), "leaf.xml", &leaf_xml);
+
+    let depth = 40;
+    let mut next = leaf;
+    for index in (0..depth).rev() {
+        let current = dir.path().join(format!("chain-{index}.xml"));
+        fs::write(
+            &current,
+            format!(
+                "<ruleset name=\"Chain {index}\">\
+                 <rule name=\"Local{index}\" class=\"PHPMD\\Rule\\Design\\LongParameterList\"/>\
+                 <rule ref=\"{}\"/>\
+                 </ruleset>\n",
+                next.display()
+            ),
+        )
+        .unwrap();
+        next = current;
+    }
+
+    let root = dir.path().join("root.xml");
+    let mut root_xml = format!("<ruleset name=\"Root\"><rule ref=\"{}\">\n", next.display());
+    for index in 0..rule_count {
+        root_xml.push_str(&format!("  <exclude name=\"Blocked{index}\"/>\n"));
+    }
+    for index in 0..depth {
+        root_xml.push_str(&format!("  <exclude name=\"Local{index}\"/>\n"));
+    }
+    root_xml.push_str("</rule></ruleset>\n");
+    fs::write(&root, root_xml).unwrap();
+
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", root.to_str().unwrap()]);
+
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+}
+
+#[test]
+fn nested_named_reference_uses_the_inner_exclusion_boundary() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(
+        dir.path(),
+        "fixture.rs",
+        r#"struct Large {
+    a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32, h: i32,
+    i: i32, j: i32, k: i32, l: i32, m: i32, n: i32, o: i32, p: i32,
+}
+fn entry_point(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32,
+    g: i32, h: i32, i: i32, j: i32, k: i32) {}
+"#,
+    );
+    let middle = dir.path().join("middle.xml");
+    let outer = dir.path().join("outer.xml");
+    fs::write(
+        &middle,
+        r#"<ruleset name="Middle">
+  <rule name="MiddleBundle" ref="codesize">
+    <exclude name="ExcessiveParameterList"/>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &outer,
+        format!(
+            r#"<ruleset name="Outer">
+  <rule ref="{}/MiddleBundle"><exclude name="TooManyFields"/></rule>
+</ruleset>
+"#,
+            middle.display()
+        ),
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", outer.to_str().unwrap()]);
+
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("TooManyFields"), "stdout={out:?}");
+    assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
 }

@@ -5,8 +5,19 @@ mod use_def;
 
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static METRIC_PARENT_LOOKUPS: Cell<usize> = const { Cell::new(0) };
+    static METRIC_FUNCTION_VISITS: Cell<usize> = const { Cell::new(0) };
+}
+
 use syn::visit::Visit;
 use syn::{Fields, FnArg, Pat, PatType, ReturnType};
+
+use crate::metrics::{effective_line_count, effective_line_prefix};
 
 use super::helpers::is_public;
 
@@ -178,9 +189,44 @@ pub(crate) struct TypeModel<'a> {
 }
 
 
+pub(crate) struct EffectiveLines {
+    effective_line_prefix: Vec<usize>,
+}
+
+impl EffectiveLines {
+    pub(crate) fn count(&self, start_line: usize, end_line: usize) -> usize {
+        effective_line_count(&self.effective_line_prefix, start_line, end_line)
+    }
+}
+
+pub(crate) struct MetricFunctions {
+    functions_by_parent: HashMap<String, Vec<usize>>,
+}
+
+impl MetricFunctions {
+    pub(crate) fn for_parent<'model, 'source>(
+        &'model self,
+        functions: &'model [FnModel<'source>],
+        parent: &str,
+    ) -> impl Iterator<Item = &'model FnModel<'source>> + 'model {
+        #[cfg(test)]
+        METRIC_PARENT_LOOKUPS.with(|lookups| lookups.set(lookups.get() + 1));
+        self.functions_by_parent
+            .get(parent)
+            .into_iter()
+            .flatten()
+            .map(|index| {
+                #[cfg(test)]
+                METRIC_FUNCTION_VISITS.with(|visits| visits.set(visits.get() + 1));
+                &functions[*index]
+            })
+    }
+}
+
 pub(crate) struct FileModel<'a> {
-    pub(crate) src: &'a str,
+    pub(crate) effective_lines: EffectiveLines,
     pub(crate) functions: Vec<FnModel<'a>>,
+    pub(crate) metric_functions: MetricFunctions,
     pub(crate) types: Vec<TypeModel<'a>>,
     pub(crate) variables: Vec<NamedBinding>,
     pub(crate) constants: Vec<NamedBinding>,
@@ -217,6 +263,18 @@ impl<'a> FileModel<'a> {
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
         collect_items(&file.items, &mut types, &mut functions);
+        let mut metric_functions_by_parent: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, function) in functions.iter().enumerate() {
+            if !function.counts_for_type_metrics {
+                continue;
+            }
+            if let Some(parent) = &function.parent {
+                metric_functions_by_parent
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
 
         let mut binder = BindingCollector {
             variables: Vec::new(),
@@ -235,7 +293,12 @@ impl<'a> FileModel<'a> {
 
         let types: Vec<_> = types.into_values().collect();
         Self {
-            src,
+            effective_lines: EffectiveLines {
+                effective_line_prefix: effective_line_prefix(src),
+            },
+            metric_functions: MetricFunctions {
+                functions_by_parent: metric_functions_by_parent,
+            },
             functions,
             types,
             variables: binder.variables,
@@ -246,8 +309,44 @@ impl<'a> FileModel<'a> {
             mutated_statics: statics.mutated,
         }
     }
+
 }
 
-
-
 pub(crate) use self::build::is_builtin_type;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parent_index_does_not_visit_unrelated_free_functions() {
+        let count = 1_000;
+        let mut source = String::new();
+        for index in 0..count {
+            source.push_str(&format!(
+                "struct Type{index};\
+                 impl Type{index} {{ fn method(&self) {{}} }}\
+                 fn unrelated_{index}() {{}}"
+            ));
+        }
+        let file = syn::parse_file(&source).expect("parse generated source");
+        let model = FileModel::from_file(&file, &source);
+        METRIC_PARENT_LOOKUPS.with(|lookups| lookups.set(0));
+        METRIC_FUNCTION_VISITS.with(|visits| visits.set(0));
+
+        let indexed_functions: usize = model
+            .types
+            .iter()
+            .map(|type_model| {
+                model
+                    .metric_functions
+                    .for_parent(&model.functions, &type_model.name)
+                    .count()
+            })
+            .sum();
+
+        assert_eq!(indexed_functions, count);
+        assert_eq!(METRIC_PARENT_LOOKUPS.with(Cell::get), count);
+        assert_eq!(METRIC_FUNCTION_VISITS.with(Cell::get), count);
+    }
+}

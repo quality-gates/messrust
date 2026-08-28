@@ -1099,6 +1099,38 @@ fn nested_only(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7
 }
 
 #[test]
+fn ignore_tests_handles_overlapping_nested_test_ranges() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "overlap.rs",
+        r#"fn production(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}
+#[cfg(test)]
+mod outer {
+fn outer_only(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}
+#[cfg(test)]
+mod inner {
+fn inner_only(p0: i32, p1: i32, p2: i32, p3: i32, p4: i32, p5: i32, p6: i32, p7: i32, p8: i32, p9: i32, p10: i32) {}
+}
+}
+"#,
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--only",
+        "ExcessiveParameterList",
+        "--ignore-tests",
+    ]);
+
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("production"), "stdout={out:?}");
+    assert!(!out.contains("outer_only"), "stdout={out:?}");
+    assert!(!out.contains("inner_only"), "stdout={out:?}");
+}
+
+#[test]
 fn upsert_type_updates_public_fields_and_begin_line() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

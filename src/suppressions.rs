@@ -1,6 +1,14 @@
 //! Source comment directives for suppressing individual findings.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static DIRECTIVE_VISITS: Cell<usize> = const { Cell::new(0) };
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DirectiveKind {
@@ -16,68 +24,120 @@ struct Directive {
     rules: Vec<String>,
 }
 
-/// Suppression state indexed by the physical source line of a finding.
+#[derive(Debug, Default)]
+struct RuleSuppressions {
+    intervals: Vec<(usize, usize)>,
+    lines: Vec<usize>,
+}
+
+/// Suppression state indexed by the lower-case rule name of a finding.
 #[derive(Debug, Default)]
 pub struct Suppressions {
-    by_line: HashMap<usize, HashSet<String>>,
+    by_rule: HashMap<String, RuleSuppressions>,
 }
 
 impl Suppressions {
     pub fn from_source(source: &str) -> Self {
         let directives = scan_directives(source);
-        let line_count = source.lines().count().max(1);
-        let mut active = HashSet::new();
-        let mut next_line: HashMap<usize, HashSet<String>> = HashMap::new();
-        let mut by_line = HashMap::new();
+        let mut active = HashMap::new();
+        let mut by_rule: HashMap<String, RuleSuppressions> = HashMap::new();
+        let mut index = 0;
 
-        for line in 1..=line_count {
-            apply_enables(&directives, line, &mut active);
-
-            let mut suppressed = active.clone();
-            if let Some(rules) = next_line.remove(&line) {
-                suppressed.extend(rules);
-            }
-            if !suppressed.is_empty() {
-                by_line.insert(line, suppressed);
-            }
-
-            apply_disables(&directives, line, &mut active, &mut next_line);
+        while index < directives.len() {
+            let line = directives[index].line;
+            let end = directives[index..]
+                .iter()
+                .position(|directive| directive.line != line)
+                .map(|offset| index + offset)
+                .unwrap_or(directives.len());
+            let line_directives = &directives[index..end];
+            apply_enables(line, line_directives, &mut active, &mut by_rule);
+            apply_disables(line, line_directives, &mut active, &mut by_rule);
+            index = end;
         }
 
-        Self { by_line }
+        for (rule, start) in active {
+            by_rule
+                .entry(rule)
+                .or_default()
+                .intervals
+                .push((start, usize::MAX));
+        }
+        for suppression in by_rule.values_mut() {
+            suppression.lines.sort_unstable();
+            suppression.lines.dedup();
+        }
+
+        Self { by_rule }
     }
 
     pub fn contains(&self, line: usize, rule: &str) -> bool {
-        self.by_line
-            .get(&line)
-            .is_some_and(|rules| rules.contains(&rule.to_ascii_lowercase()))
+        let key = rule.to_ascii_lowercase();
+        let Some(suppression) = self.by_rule.get(&key) else {
+            return false;
+        };
+        if suppression.lines.binary_search(&line).is_ok() {
+            return true;
+        }
+        let index = suppression
+            .intervals
+            .partition_point(|(start, _)| *start <= line);
+        index > 0 && suppression.intervals[index - 1].1 >= line
     }
 }
 
-fn apply_enables(directives: &[Directive], line: usize, active: &mut HashSet<String>) {
-    for directive in directives
-        .iter()
-        .filter(|directive| directive.line == line && directive.kind == DirectiveKind::Enable)
-    {
+fn apply_enables(
+    line: usize,
+    directives: &[Directive],
+    active: &mut HashMap<String, usize>,
+    by_rule: &mut HashMap<String, RuleSuppressions>,
+) {
+    for directive in directives {
+        #[cfg(test)]
+        DIRECTIVE_VISITS.with(|visits| visits.set(visits.get() + 1));
+        if directive.kind != DirectiveKind::Enable {
+            continue;
+        }
         for rule in &directive.rules {
-            active.remove(rule);
+            let Some(start) = active.remove(rule) else {
+                continue;
+            };
+            let interval_end = line.saturating_sub(1);
+            if start <= interval_end {
+                by_rule
+                    .entry(rule.clone())
+                    .or_default()
+                    .intervals
+                    .push((start, interval_end));
+            }
         }
     }
 }
 
 fn apply_disables(
-    directives: &[Directive],
     line: usize,
-    active: &mut HashSet<String>,
-    next_line: &mut HashMap<usize, HashSet<String>>,
+    directives: &[Directive],
+    active: &mut HashMap<String, usize>,
+    by_rule: &mut HashMap<String, RuleSuppressions>,
 ) {
-    for directive in directives.iter().filter(|directive| directive.line == line) {
+    for directive in directives {
+        #[cfg(test)]
+        DIRECTIVE_VISITS.with(|visits| visits.set(visits.get() + 1));
         match directive.kind {
-            DirectiveKind::Disable => active.extend(directive.rules.iter().cloned()),
-            DirectiveKind::DisableNextLine => next_line
-                .entry(line + 1)
-                .or_default()
-                .extend(directive.rules.iter().cloned()),
+            DirectiveKind::Disable => {
+                for rule in &directive.rules {
+                    active.entry(rule.clone()).or_insert(line + 1);
+                }
+            }
+            DirectiveKind::DisableNextLine => {
+                for rule in &directive.rules {
+                    by_rule
+                        .entry(rule.clone())
+                        .or_default()
+                        .lines
+                        .push(line + 1);
+                }
+            }
             DirectiveKind::Enable => {}
         }
     }
@@ -354,7 +414,9 @@ fn has_hashes(bytes: &[u8], start: usize, count: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::Suppressions;
+    use std::cell::Cell;
+
+    use super::{Suppressions, DIRECTIVE_VISITS};
 
     #[test]
     fn supports_next_line_regions_and_case_insensitive_names() {
@@ -379,5 +441,38 @@ mod tests {
         let suppressions = Suppressions::from_source(source);
         assert!(suppressions.contains(5, "LongVariable"));
         assert!(!suppressions.contains(7, "foo"));
+    }
+
+    #[test]
+    fn one_active_rule_uses_one_interval_for_many_lines() {
+        let mut source = String::from("// messrust-disable LongVariable\n");
+        source.extend(std::iter::repeat_n("let value = 1;\n", 10_000));
+
+        let suppressions = Suppressions::from_source(&source);
+        let rule = &suppressions.by_rule["longvariable"];
+
+        assert_eq!(rule.intervals, vec![(2, usize::MAX)]);
+        assert!(rule.lines.is_empty());
+    }
+
+    #[test]
+    fn many_directives_create_one_interval_for_each_active_region() {
+        DIRECTIVE_VISITS.with(|visits| visits.set(0));
+        let mut source = String::new();
+        for _ in 0..5_000 {
+            source.push_str("// messrust-disable LongVariable\n");
+            source.push_str("let suppressed = 1;\n");
+            source.push_str("// messrust-enable LongVariable\n");
+            source.push_str("let active = 1;\n");
+        }
+
+        let suppressions = Suppressions::from_source(&source);
+        let rule = &suppressions.by_rule["longvariable"];
+
+        assert_eq!(rule.intervals.len(), 5_000);
+        assert_eq!(rule.intervals[0], (2, 2));
+        assert_eq!(rule.intervals[4_999], (19_998, 19_998));
+        assert!(rule.lines.is_empty());
+        assert_eq!(DIRECTIVE_VISITS.with(Cell::get), 20_000);
     }
 }
