@@ -13,8 +13,9 @@ use crate::analyze::helpers::is_public;
 
 use super::use_def::{is_binding_name, path_single_ident};
 use super::{
-    bool_params, count_params, field_stats, returns_bool, type_name_from_path, DuplicateKey,
-    FieldInfo, FnModel, MethodRef, NamedBinding, NamedSite, TypeModel,
+    bool_params, count_params, field_stats, full_type_path_from_type, returns_bool,
+    type_name_from_path, DuplicateKey, FieldInfo, FnModel, MethodRef, NamedBinding, NamedSite,
+    TypeModel,
 };
 
 #[derive(Default)]
@@ -118,20 +119,30 @@ impl<'ast> Visit<'ast> for BindingCollector {
 }
 
 
+fn scoped_key(scope: &str, name: &str) -> String {
+    if scope.is_empty() {
+        name.to_string()
+    } else {
+        format!("{scope}::{name}")
+    }
+}
+
+
 pub(crate) fn collect_items<'a>(
     items: &'a [Item],
+    scope: &str,
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
 ) {
     for item in items {
         match item {
-            Item::Struct(s) => insert_struct(types, s),
-            Item::Enum(e) => insert_enum(types, e),
-            Item::Union(u) => insert_union(types, u),
-            Item::Trait(t) => insert_trait(types, t, functions),
+            Item::Struct(s) => insert_struct(types, s, scope),
+            Item::Enum(e) => insert_enum(types, e, scope),
+            Item::Union(u) => insert_union(types, u, scope),
+            Item::Trait(t) => insert_trait(types, t, functions, scope),
             Item::Fn(f) => functions.push(fn_from_item(f)),
-            Item::Impl(im) => attach_impl(types, functions, im),
-            Item::Mod(module) => collect_module_items(module, types, functions),
+            Item::Impl(im) => attach_impl(types, functions, im, scope),
+            Item::Mod(module) => collect_module_items(module, scope, types, functions),
             _ => {}
         }
     }
@@ -140,16 +151,20 @@ pub(crate) fn collect_items<'a>(
 
 pub(crate) fn collect_module_items<'a>(
     module: &'a syn::ItemMod,
+    scope: &str,
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
 ) {
     if let Some((_, nested)) = &module.content {
-        collect_items(nested, types, functions);
+        let mod_name = module.ident.to_string();
+        let new_scope = scoped_key(scope, &mod_name);
+        collect_items(nested, &new_scope, types, functions);
     }
 }
 
 
 pub(crate) struct TypeDefinition {
+    pub(crate) key: String,
     pub(crate) name: String,
     pub(crate) node_type: &'static str,
     pub(crate) begin_line: usize,
@@ -162,6 +177,7 @@ pub(crate) struct TypeDefinition {
 
 pub(crate) fn upsert_type<'a>(types: &mut HashMap<String, TypeModel<'a>>, definition: TypeDefinition) {
     let TypeDefinition {
+        key,
         name,
         node_type,
         begin_line,
@@ -170,7 +186,7 @@ pub(crate) fn upsert_type<'a>(types: &mut HashMap<String, TypeModel<'a>>, defini
         public_fields,
         fields,
     } = definition;
-    match types.entry(name.clone()) {
+    match types.entry(key.clone()) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
             let existing = entry.get_mut();
             existing.node_type = node_type.to_string();
@@ -184,6 +200,7 @@ pub(crate) fn upsert_type<'a>(types: &mut HashMap<String, TypeModel<'a>>, defini
         }
         std::collections::hash_map::Entry::Vacant(entry) => {
             entry.insert(TypeModel {
+                key,
                 name,
                 node_type: node_type.to_string(),
                 begin_line,
@@ -227,12 +244,19 @@ pub(crate) fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
 }
 
 
-pub(crate) fn insert_struct<'a>(types: &mut HashMap<String, TypeModel<'a>>, s: &'a ItemStruct) {
+pub(crate) fn insert_struct<'a>(
+    types: &mut HashMap<String, TypeModel<'a>>,
+    s: &'a ItemStruct,
+    scope: &str,
+) {
     let (field_count, public_fields) = field_stats(&s.fields);
+    let name = s.ident.to_string();
+    let key = scoped_key(scope, &name);
     upsert_type(
         types,
         TypeDefinition {
-            name: s.ident.to_string(),
+            key,
+            name,
             node_type: "struct",
             begin_line: s.struct_token.span().start().line,
             end_line: s.span().end().line,
@@ -244,17 +268,24 @@ pub(crate) fn insert_struct<'a>(types: &mut HashMap<String, TypeModel<'a>>, s: &
 }
 
 
-pub(crate) fn insert_enum<'a>(types: &mut HashMap<String, TypeModel<'a>>, e: &'a ItemEnum) {
+pub(crate) fn insert_enum<'a>(
+    types: &mut HashMap<String, TypeModel<'a>>,
+    e: &'a ItemEnum,
+    scope: &str,
+) {
     let mut fields = Vec::new();
     for v in &e.variants {
         for f in field_infos(&v.fields) {
             fields.push(f);
         }
     }
+    let name = e.ident.to_string();
+    let key = scoped_key(scope, &name);
     upsert_type(
         types,
         TypeDefinition {
-            name: e.ident.to_string(),
+            key,
+            name,
             node_type: "enum",
             begin_line: e.enum_token.span().start().line,
             end_line: e.span().end().line,
@@ -266,7 +297,11 @@ pub(crate) fn insert_enum<'a>(types: &mut HashMap<String, TypeModel<'a>>, e: &'a
 }
 
 
-pub(crate) fn insert_union<'a>(types: &mut HashMap<String, TypeModel<'a>>, u: &'a ItemUnion) {
+pub(crate) fn insert_union<'a>(
+    types: &mut HashMap<String, TypeModel<'a>>,
+    u: &'a ItemUnion,
+    scope: &str,
+) {
     let field_count = u.fields.named.len();
     let public_fields = u.fields.named.iter().filter(|f| is_public(&f.vis)).count();
     let fields = u
@@ -282,10 +317,13 @@ pub(crate) fn insert_union<'a>(types: &mut HashMap<String, TypeModel<'a>>, u: &'
             })
         })
         .collect();
+    let name = u.ident.to_string();
+    let key = scoped_key(scope, &name);
     upsert_type(
         types,
         TypeDefinition {
-            name: u.ident.to_string(),
+            key,
+            name,
             node_type: "union",
             begin_line: u.union_token.span().start().line,
             end_line: u.span().end().line,
@@ -301,25 +339,29 @@ pub(crate) fn insert_trait<'a>(
     types: &mut HashMap<String, TypeModel<'a>>,
     t: &'a ItemTrait,
     functions: &mut Vec<FnModel<'a>>,
+    scope: &str,
 ) {
     let trait_public = is_public(&t.vis);
     let mut methods = Vec::new();
+    let name = t.ident.to_string();
+    let key = scoped_key(scope, &name);
     for item in &t.items {
         if let syn::TraitItem::Fn(m) = item {
             let begin = m.sig.fn_token.span().start().line;
             let end = m.span().end().line;
             let body = m.default.as_ref();
-            let name = m.sig.ident.to_string();
+            let method_name = m.sig.ident.to_string();
             methods.push(MethodRef {
-                name: name.clone(),
+                name: method_name.clone(),
                 begin_line: begin,
                 end_line: end,
                 is_public: trait_public,
                 body,
             });
             functions.push(FnModel {
-                name,
-                parent: Some(t.ident.to_string()),
+                name: method_name,
+                parent: Some(name.clone()),
+                parent_key: Some(key.clone()),
                 begin_line: begin,
                 end_line: end,
                 param_count: count_params(&m.sig.inputs),
@@ -331,9 +373,8 @@ pub(crate) fn insert_trait<'a>(
             });
         }
     }
-    let name = t.ident.to_string();
     types
-        .entry(name.clone())
+        .entry(key.clone())
         .and_modify(|existing| {
             existing.node_type = "trait".to_string();
             existing.begin_line = t.trait_token.span().start().line;
@@ -342,6 +383,7 @@ pub(crate) fn insert_trait<'a>(
             existing.methods.append(&mut methods);
         })
         .or_insert_with(|| TypeModel {
+            key,
             name,
             node_type: "trait".to_string(),
             begin_line: t.trait_token.span().start().line,
@@ -358,6 +400,7 @@ pub(crate) fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
     FnModel {
         name: f.sig.ident.to_string(),
         parent: None,
+        parent_key: None,
         begin_line: f.sig.fn_token.span().start().line,
         end_line: f.span().end().line,
         param_count: count_params(&f.sig.inputs),
@@ -374,12 +417,23 @@ pub(crate) fn attach_impl<'a>(
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
     im: &'a ItemImpl,
+    scope: &str,
 ) {
     let ty_name = type_name_from_path(&im.self_ty);
     if ty_name.is_empty() {
         return;
     }
-    types.entry(ty_name.clone()).or_insert_with(|| TypeModel {
+    let full_path = full_type_path_from_type(&im.self_ty);
+    let scoped = scoped_key(scope, &full_path);
+    let key = if types.contains_key(&scoped) {
+        scoped
+    } else if types.contains_key(&full_path) {
+        full_path
+    } else {
+        scoped
+    };
+    types.entry(key.clone()).or_insert_with(|| TypeModel {
+        key: key.clone(),
         name: ty_name.clone(),
         node_type: "struct".to_string(),
         begin_line: im.impl_token.span().start().line,
@@ -396,7 +450,7 @@ pub(crate) fn attach_impl<'a>(
             let name = m.sig.ident.to_string();
             let is_pub = is_public(&m.vis);
             if im.trait_.is_none() {
-                types.get_mut(&ty_name).unwrap().methods.push(MethodRef {
+                types.get_mut(&key).unwrap().methods.push(MethodRef {
                     name: name.clone(),
                     begin_line: begin,
                     end_line: end,
@@ -407,6 +461,7 @@ pub(crate) fn attach_impl<'a>(
             functions.push(FnModel {
                 name,
                 parent: Some(ty_name.clone()),
+                parent_key: Some(key.clone()),
                 begin_line: begin,
                 end_line: end,
                 param_count: count_params(&m.sig.inputs),

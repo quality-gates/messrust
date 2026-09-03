@@ -31,7 +31,7 @@ fn discover_path(
 ) -> Result<(), String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if meta.is_file() {
-        if !opts.ignore_tests || !is_test_path(path) {
+        if (!opts.ignore_tests || !is_test_path(path)) && !is_excluded(path, &opts.exclude) {
             push_unique(out, seen, path.to_path_buf());
         }
         return Ok(());

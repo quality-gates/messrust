@@ -106,6 +106,19 @@ pub(crate) fn type_name_from_path(ty: &syn::Type) -> String {
     }
 }
 
+pub(crate) fn full_type_path_from_type(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Path(p) => p
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        _ => String::new(),
+    }
+}
+
 
 pub(crate) fn returns_bool(output: &ReturnType) -> bool {
     match output {
@@ -137,6 +150,7 @@ pub(crate) struct DuplicateKey {
 pub(crate) struct FnModel<'a> {
     pub(crate) name: String,
     pub(crate) parent: Option<String>,
+    pub(crate) parent_key: Option<String>,
     pub(crate) begin_line: usize,
     pub(crate) end_line: usize,
     pub(crate) param_count: usize,
@@ -178,6 +192,7 @@ pub(crate) struct FieldInfo {
 
 
 pub(crate) struct TypeModel<'a> {
+    pub(crate) key: String,
     pub(crate) name: String,
     pub(crate) node_type: String,
     pub(crate) begin_line: usize,
@@ -262,15 +277,15 @@ impl<'a> FileModel<'a> {
     pub(crate) fn from_file(file: &'a syn::File, src: &'a str) -> Self {
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
-        collect_items(&file.items, &mut types, &mut functions);
+        collect_items(&file.items, "", &mut types, &mut functions);
         let mut metric_functions_by_parent: HashMap<String, Vec<usize>> = HashMap::new();
         for (index, function) in functions.iter().enumerate() {
             if !function.counts_for_type_metrics {
                 continue;
             }
-            if let Some(parent) = &function.parent {
+            if let Some(parent_key) = &function.parent_key {
                 metric_functions_by_parent
-                    .entry(parent.clone())
+                    .entry(parent_key.clone())
                     .or_default()
                     .push(index);
             }
@@ -340,7 +355,7 @@ mod tests {
             .map(|type_model| {
                 model
                     .metric_functions
-                    .for_parent(&model.functions, &type_model.name)
+                    .for_parent(&model.functions, &type_model.key)
                     .count()
             })
             .sum();

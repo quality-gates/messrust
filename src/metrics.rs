@@ -49,28 +49,28 @@ impl<'ast> Visit<'ast> for CcnVisitor {
     }
 
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        self.ccn += 1;
+        self.ccn = self.ccn.saturating_add(1);
         syn::visit::visit_expr_for_loop(self, node);
     }
 
     fn visit_expr_loop(&mut self, node: &'ast syn::ExprLoop) {
-        self.ccn += 1;
+        self.ccn = self.ccn.saturating_add(1);
         syn::visit::visit_expr_loop(self, node);
     }
 
     fn visit_arm(&mut self, node: &'ast syn::Arm) {
         if !is_default_match_pat(&node.pat) {
-            self.ccn += 1;
+            self.ccn = self.ccn.saturating_add(1);
         }
         if node.guard.is_some() {
-            self.ccn += 1;
+            self.ccn = self.ccn.saturating_add(1);
         }
         syn::visit::visit_arm(self, node);
     }
 
     fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
         if matches!(node.op, BinOp::And(_) | BinOp::Or(_)) {
-            self.ccn += 1;
+            self.ccn = self.ccn.saturating_add(1);
         }
         syn::visit::visit_expr_binary(self, node);
     }
@@ -126,10 +126,10 @@ fn npath_control_flow(expr: &Expr) -> Option<usize> {
         Expr::If(node) => Some(npath_if(node)),
         Expr::Match(node) => Some(npath_match(node)),
         Expr::ForLoop(node) => {
-            Some(expression_complexity(&node.expr) + 1 + npath_block(&node.body))
+            Some(expression_complexity(&node.expr).saturating_add(1).saturating_add(npath_block(&node.body)))
         }
-        Expr::While(node) => Some(expression_complexity(&node.cond) + 1 + npath_block(&node.body)),
-        Expr::Loop(node) => Some(1 + npath_block(&node.body)),
+        Expr::While(node) => Some(expression_complexity(&node.cond).saturating_add(1).saturating_add(npath_block(&node.body))),
+        Expr::Loop(node) => Some(1usize.saturating_add(npath_block(&node.body))),
         _ => None,
     }
 }
@@ -165,16 +165,16 @@ fn npath_if(node: &ExprIf) -> usize {
             _ => unreachable!("else branch is always a block or an `if`"),
         },
     };
-    else_part + body + expr
+    else_part.saturating_add(body).saturating_add(expr)
 }
 
 fn npath_match(node: &syn::ExprMatch) -> usize {
     let mut npath = expression_complexity(&node.expr);
     for arm in &node.arms {
         if let Some((_, guard)) = &arm.guard {
-            npath += expression_complexity(guard);
+            npath = npath.saturating_add(expression_complexity(guard));
         }
-        npath += npath_expr_stmt(&arm.body);
+        npath = npath.saturating_add(npath_expr_stmt(&arm.body));
     }
     if npath == 0 {
         1
@@ -197,7 +197,7 @@ struct BoolOpVisitor {
 impl<'ast> Visit<'ast> for BoolOpVisitor {
     fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
         if matches!(node.op, BinOp::And(_) | BinOp::Or(_)) {
-            self.count += 1;
+            self.count = self.count.saturating_add(1);
         }
         syn::visit::visit_expr_binary(self, node);
     }
