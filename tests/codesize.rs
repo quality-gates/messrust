@@ -1235,3 +1235,66 @@ fn excessive_parameter_list_skips_typed_self_receiver() {
     let (code, out, err) = run_only(&path, "ExcessiveParameterList");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
+
+#[test]
+fn npath_complexity_does_not_overflow_on_deep_control_flow() {
+    let dir = TempDir::new().unwrap();
+    let mut stmts = String::new();
+    for i in 0..70 {
+        stmts.push_str(&format!("        if a[{i}] {{ let _x = 1; }} else {{ let _x = 2; }}\n"));
+    }
+    let src = format!("fn high_npath(a: &[bool]) {{\n    if true {{\n{stmts}    }}\n}}\n");
+    let path = write_file(dir.path(), "overflow.rs", &src);
+    let (code, out, err) = run_only(&path, "NPathComplexity");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert!(out.contains("NPathComplexity"), "stdout={out:?}");
+}
+
+#[test]
+fn duplicate_type_names_in_different_modules_retain_all_violations() {
+    let dir = TempDir::new().unwrap();
+    let fields: String = (0..20).map(|i| format!("        pub f{i}: i32,\n")).collect();
+    let src = format!(
+        r#"mod a {{
+    pub struct Foo {{
+{fields}    }}
+}}
+
+mod b {{
+    pub struct Foo {{
+        pub y: i32,
+    }}
+}}
+"#
+    );
+    let path = write_file(dir.path(), "dup_types.rs", &src);
+    let (code, out, err) = run_only(&path, "TooManyFields");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert!(out.contains("TooManyFields"), "stdout={out:?}");
+    assert!(out.contains("The struct Foo has 20 fields"), "stdout={out:?}");
+}
+
+#[test]
+fn duplicate_type_names_in_different_modules_do_not_merge_methods() {
+    let dir = TempDir::new().unwrap();
+    let src = r#"mod a {
+    pub struct Foo;
+    impl Foo {
+        pub fn a1() {} pub fn a2() {} pub fn a3() {} pub fn a4() {} pub fn a5() {} pub fn a6() {}
+    }
+}
+
+mod b {
+    pub struct Foo;
+    impl Foo {
+        pub fn b1() {} pub fn b2() {} pub fn b3() {} pub fn b4() {} pub fn b5() {}
+    }
+}
+"#;
+    let path = write_file(dir.path(), "dup_methods.rs", src);
+    let (code, out, err) = run_only(&path, "TooManyPublicMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("TooManyPublicMethods"), "stdout={out:?}");
+}
+
+

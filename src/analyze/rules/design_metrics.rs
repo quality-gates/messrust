@@ -294,7 +294,7 @@ pub(crate) fn coupling_between_objects(t: &TypeModel<'_>, model: &FileModel<'_>)
     }
     for f in model
         .metric_functions
-        .for_parent(&model.functions, &t.name)
+        .for_parent(&model.functions, &t.key)
     {
         add_type_dependencies(&mut deps, &f.dep_types, &t.name);
     }

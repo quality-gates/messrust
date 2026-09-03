@@ -932,3 +932,29 @@ fn entry_point(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32,
     assert!(out.contains("TooManyFields"), "stdout={out:?}");
     assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
 }
+
+#[test]
+fn custom_ruleset_file_named_codesize_is_loaded_from_disk() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "test.rs", &fixture_with_params(11));
+    let custom_xml = dir.path().join("codesize.xml");
+    fs::write(
+        &custom_xml,
+        r#"<ruleset name="CustomCodesize">
+  <rule name="ExcessiveParameterList"
+        message="Custom Parameter Limit: {0}"
+        class="PHPMD\Rule\Design\LongParameterList"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        custom_xml.to_str().unwrap(),
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("Custom Parameter Limit:"), "stdout={out:?}");
+}
+

@@ -310,3 +310,20 @@ fn special_file_that_is_not_a_regular_file_or_directory_errors() {
         "stderr={err:?}"
     );
 }
+
+#[test]
+fn exclude_filters_direct_file_paths() {
+    let dir = TempDir::new().unwrap();
+    let keep = write_file(dir.path(), "keep.rs", &fn_with_n_params(11));
+    let skip = write_file(dir.path(), "skip.rs", &fn_with_n_params(11));
+    let (code, out, err) = run_cli(&[
+        &format!("{},{}", keep.display(), skip.display()),
+        "json",
+        "codesize",
+        "--exclude",
+        "skip",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_eq!(reported_basenames(&out), vec!["keep.rs"]);
+}
+

@@ -57,6 +57,25 @@ fn help_prints_usage_to_stdout_and_exits_zero() {
 }
 
 #[test]
+fn help_flag_anywhere_in_args_prints_usage_and_exits_zero() {
+    for flag in ["--help", "-h"] {
+        let (code, out, err) = run_cli(&["src", "text", "codesize", flag]);
+        assert_eq!(code, EXIT_SUCCESS, "flag={flag}");
+        assert!(out.contains("Usage:"), "stdout={out:?}");
+        assert!(err.is_empty(), "stderr={err:?}");
+    }
+}
+
+#[test]
+fn version_flag_anywhere_in_args_prints_version_and_exits_zero() {
+    let (code, out, err) = run_cli(&["src", "text", "codesize", "--version"]);
+    assert_eq!(code, EXIT_SUCCESS);
+    assert!(out.contains(env!("CARGO_PKG_VERSION")), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+
+#[test]
 fn no_args_prints_usage_to_stderr_and_exits_one() {
     let (code, out, err) = run_cli(&[]);
     assert_eq!(code, EXIT_ERROR);

@@ -85,8 +85,15 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         return EXIT_ERROR;
     }
 
-    if let Some(code) = handle_info_flags(&args[0], stdout) {
-        return code;
+    if args[0] == "help" {
+        print_usage(stdout);
+        return EXIT_SUCCESS;
+    }
+
+    for arg in args {
+        if let Some(code) = handle_info_flags(arg, stdout) {
+            return code;
+        }
     }
 
     let (mut opt, positionals) = match parse_args(args) {
@@ -109,13 +116,13 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
     run_analysis(opt, stdout, stderr)
 }
 
-fn handle_info_flags(first: &str, stdout: &mut dyn Write) -> Option<i32> {
-    match first {
+fn handle_info_flags(flag: &str, stdout: &mut dyn Write) -> Option<i32> {
+    match flag {
         "--version" => {
             let _ = writeln!(stdout, "messrust {}", env!("CARGO_PKG_VERSION"));
             Some(EXIT_SUCCESS)
         }
-        "--help" | "-h" | "help" => {
+        "--help" | "-h" => {
             print_usage(stdout);
             Some(EXIT_SUCCESS)
         }

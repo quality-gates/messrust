@@ -1533,9 +1533,6 @@ const RULE_KINDS: &[(&str, RuleKind)] = &[
 ];
 
 fn read_ruleset(ident: &str) -> Result<(String, String), String> {
-    if let Some((xml, name)) = builtin_xml(ident) {
-        return Ok((xml.to_string(), name.to_string()));
-    }
     let path = PathBuf::from(ident);
     if path.is_file() {
         let xml = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1546,23 +1543,34 @@ fn read_ruleset(ident: &str) -> Result<(String, String), String> {
             .to_string();
         return Ok((xml, name));
     }
+    if let Some((xml, name)) = builtin_xml(ident) {
+        return Ok((xml.to_string(), name.to_string()));
+    }
     Err(format!("unknown ruleset or file: {ident}"))
 }
 
 fn stable_ruleset_id(ident: &str) -> Result<String, String> {
-    if let Some(key) = normalize_builtin_key(ident) {
-        return Ok(format!("builtin:{key}"));
-    }
     let path = PathBuf::from(ident);
     if path.is_file() {
         return fs::canonicalize(&path)
             .map(|path| path.to_string_lossy().into_owned())
             .map_err(|error| format!("{}: {error}", path.display()));
     }
+    if let Some(key) = normalize_builtin_key(ident) {
+        return Ok(format!("builtin:{key}"));
+    }
     Err(format!("unknown ruleset or file: {ident}"))
 }
 
 fn ruleset_display_name(ident: &str) -> String {
+    let path = Path::new(ident);
+    if path.is_file() {
+        return path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or(ident)
+            .to_string();
+    }
     if let Some(key) = normalize_builtin_key(ident) {
         return key;
     }
