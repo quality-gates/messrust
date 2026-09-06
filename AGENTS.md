@@ -1,5 +1,8 @@
 Reply only in ASD-STE100 Simplified Technical English.
 
+Do all development work, debugging, etc. in a Docker container with capped resources.
+Always clean up build target cruft after work is done.
+
 ## Agent skills
 
 ### Issue tracker
@@ -36,6 +39,8 @@ Standard commands (run from repo root):
 * Test: `cargo test` (the `pack_install_smoke` test runs `cargo install` and
   takes ~20 s).
 * Lint: `cargo clippy --all-targets` and `cargo fmt --check`.
+* Development environment: do all development work, debugging, etc. in a Docker container with capped resources (for example: `docker run --rm -it --cpus=2 --memory=2g -v "$PWD":/workspace messrust-dev`).
+* Build cruft: always clean up build target cruft after work is done (run `cargo clean` or delete the `target/` directory).
 
 Caveat: under stable `1.97`, `cargo fmt --check` reports diffs and `cargo
 clippy` reports warnings on existing code. This is toolchain-version drift from
