@@ -451,6 +451,35 @@ fn lifetime_tick_does_not_break_directive() {
     assert_eq!(code, EXIT_SUCCESS, "lifetime tick should not break directive");
 }
 
+#[test]
+fn directive_between_lifetimes_on_same_line_suppresses_finding() {
+    let dir = TempDir::new().unwrap();
+    let source = "fn foo<'a, /* messrust-disable-next-line ShortVariable */ 'b>() {\n    let x = 1;\n    let _ = x;\n}\n";
+    let path = write_file(dir.path(), "fixture.rs", source);
+    let (code, out, _err) = run_cli(&[path.to_str().unwrap(), "text", "naming"]);
+    assert_eq!(code, EXIT_SUCCESS, "directive between lifetimes should suppress finding: {out:?}");
+}
+
+#[test]
+fn disable_and_enable_directives_between_lifetimes_take_effect() {
+    let dir = TempDir::new().unwrap();
+    let source = "fn foo<'a, /* messrust-disable ShortVariable */ 'b>() {\n    let x = 1;\n    let _ = x;\n}\nfn bar<'c, /* messrust-enable ShortVariable */ 'd>() {\n    let y = 2;\n    let _ = y;\n}\n";
+    let path = write_file(dir.path(), "fixture.rs", source);
+    let (code, out, _err) = run_cli(&[path.to_str().unwrap(), "text", "naming"]);
+    assert_eq!(code, EXIT_VIOLATION);
+    assert!(!out.contains(":2"), "line 2 should be suppressed: {out:?}");
+    assert!(out.contains(":6"), "line 6 should fire: {out:?}");
+}
+
+#[test]
+fn standard_char_literals_do_not_interfere_with_scanner() {
+    let dir = TempDir::new().unwrap();
+    let source = "const C1: char = 'c';\nconst C2: char = '\\\\';\nconst C3: char = '\\n';\nconst C4: char = '\\'';\n/* messrust-disable-next-line ShortVariable */\nfn foo() { let x = 1; let _ = x; }\n";
+    let path = write_file(dir.path(), "fixture.rs", source);
+    let (code, out, _err) = run_cli(&[path.to_str().unwrap(), "text", "naming"]);
+    assert_eq!(code, EXIT_SUCCESS, "char literals should not affect directive: {out:?}");
+}
+
 // ---------------------------------------------------------------------------
 // enable takes effect on its own line
 // ---------------------------------------------------------------------------
