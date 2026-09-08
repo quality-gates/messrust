@@ -218,13 +218,14 @@ impl<'a> DirectiveScanner<'a> {
     }
 
     fn scan_character(&mut self) {
-        let bytes = self.source.as_bytes();
-        let end = if looks_like_char_literal(bytes, self.index) {
-            skip_quoted(bytes, self.index + 1, b'\'')
+        let end = if let Some(end) = char_literal_end(self.source, self.index) {
+            end
+        } else if let Some(end) = lifetime_end(self.source, self.index) {
+            end
         } else {
             self.index + 1
         };
-        self.line += newline_count(&bytes[self.index..end]);
+        self.line += newline_count(&self.source.as_bytes()[self.index..end]);
         self.index = end;
     }
 
@@ -348,29 +349,106 @@ fn skip_quoted(bytes: &[u8], mut index: usize, quote: u8) -> usize {
     index
 }
 
-fn looks_like_char_literal(bytes: &[u8], index: usize) -> bool {
-    let Some(mut end) = bytes.get(index + 1).copied() else {
-        return false;
-    };
-    if end == b'\\' {
-        end = bytes.get(index + 2).copied().unwrap_or_default();
-        if end == 0 {
-            return false;
-        }
-    } else if end == b'\n' || end == b'\r' {
-        return false;
+fn char_literal_end(source: &str, index: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(index) != Some(&b'\'') {
+        return None;
     }
-    let mut cursor = index + 2;
-    while cursor < bytes.len() && bytes[cursor] != b'\n' {
-        if bytes[cursor] == b'\\' {
-            cursor = cursor.saturating_add(2);
-        } else if bytes[cursor] == b'\'' {
-            return true;
+    if bytes.get(index + 1) == Some(&b'\\') {
+        escape_char_literal_end(bytes, index)
+    } else {
+        plain_char_literal_end(source, index)
+    }
+}
+
+fn plain_char_literal_end(source: &str, index: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let next = *bytes.get(index + 1)?;
+    if next == b'\'' || next == b'\n' || next == b'\r' {
+        return None;
+    }
+    let ch = source[index + 1..].chars().next()?;
+    let end = index + 1 + ch.len_utf8();
+    if bytes.get(end) == Some(&b'\'') {
+        Some(end + 1)
+    } else {
+        None
+    }
+}
+
+fn escape_char_literal_end(bytes: &[u8], index: usize) -> Option<usize> {
+    let escape = *bytes.get(index + 2)?;
+    match escape {
+        b'\'' | b'"' | b'n' | b'r' | b't' | b'\\' | b'0' => {
+            (bytes.get(index + 3) == Some(&b'\'')).then_some(index + 4)
+        }
+        b'x' => hex_escape_end(bytes, index),
+        b'u' => unicode_escape_end(bytes, index),
+        _ => None,
+    }
+}
+
+fn hex_escape_end(bytes: &[u8], index: usize) -> Option<usize> {
+    let b1 = bytes.get(index + 3)?;
+    let b2 = bytes.get(index + 4)?;
+    let quote = bytes.get(index + 5)?;
+    if b1.is_ascii_hexdigit() && b2.is_ascii_hexdigit() && *quote == b'\'' {
+        Some(index + 6)
+    } else {
+        None
+    }
+}
+
+fn count_unicode_escape_digits(bytes: &[u8], start: usize) -> (usize, usize) {
+    let mut pos = start;
+    let mut digits = 0;
+    while pos < bytes.len() {
+        let b = bytes[pos];
+        if b.is_ascii_hexdigit() {
+            digits += 1;
+        } else if b != b'_' {
+            break;
+        }
+        pos += 1;
+    }
+    (digits, pos)
+}
+
+fn unicode_escape_end(bytes: &[u8], index: usize) -> Option<usize> {
+    if bytes.get(index + 3) != Some(&b'{') {
+        return None;
+    }
+    let (digits, pos) = count_unicode_escape_digits(bytes, index + 4);
+    if (1..=6).contains(&digits)
+        && bytes.get(pos) == Some(&b'}')
+        && bytes.get(pos + 1) == Some(&b'\'')
+    {
+        Some(pos + 2)
+    } else {
+        None
+    }
+}
+
+fn lifetime_end(source: &str, index: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(index) != Some(&b'\'') {
+        return None;
+    }
+    let tail = &source[index + 1..];
+    let mut chars = tail.char_indices();
+    let (_, first) = chars.next()?;
+    if first != '_' && !first.is_alphabetic() {
+        return None;
+    }
+    let mut end = index + 1 + first.len_utf8();
+    for (_, ch) in chars {
+        if ch == '_' || ch.is_alphanumeric() {
+            end += ch.len_utf8();
         } else {
-            cursor += 1;
+            break;
         }
     }
-    false
+    Some(end)
 }
 
 fn skip_raw_or_byte_string(bytes: &[u8], index: usize) -> Option<usize> {
@@ -474,5 +552,12 @@ mod tests {
         assert_eq!(rule.intervals[4_999], (19_998, 19_998));
         assert!(rule.lines.is_empty());
         assert_eq!(DIRECTIVE_VISITS.with(Cell::get), 20_000);
+    }
+
+    #[test]
+    fn accepts_directive_between_lifetimes_on_same_line() {
+        let source = "fn foo<'a, /* messrust-disable-next-line ShortVariable */ 'b>() {\n    let x = 1;\n}\n";
+        let suppressions = Suppressions::from_source(source);
+        assert!(suppressions.contains(2, "ShortVariable"));
     }
 }
