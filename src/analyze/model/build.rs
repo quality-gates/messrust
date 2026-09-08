@@ -194,6 +194,7 @@ pub(crate) fn upsert_type<'a>(types: &mut HashMap<String, TypeModel<'a>>, defini
             existing.end_line = end_line;
             existing.field_count = field_count;
             existing.public_fields = public_fields;
+            existing.has_declaration = true;
             if !fields.is_empty() {
                 existing.fields = fields;
             }
@@ -209,6 +210,7 @@ pub(crate) fn upsert_type<'a>(types: &mut HashMap<String, TypeModel<'a>>, defini
                 public_fields,
                 fields,
                 methods: Vec::new(),
+                has_declaration: true,
             });
         }
     }
@@ -380,6 +382,7 @@ pub(crate) fn insert_trait<'a>(
             existing.begin_line = t.trait_token.span().start().line;
             existing.end_line = t.span().end().line;
             existing.public_fields = 0;
+            existing.has_declaration = true;
             existing.methods.append(&mut methods);
         })
         .or_insert_with(|| TypeModel {
@@ -392,6 +395,7 @@ pub(crate) fn insert_trait<'a>(
             public_fields: 0,
             fields: Vec::new(),
             methods,
+            has_declaration: true,
         });
 }
 
@@ -442,6 +446,7 @@ pub(crate) fn attach_impl<'a>(
         public_fields: 0,
         fields: Vec::new(),
         methods: Vec::new(),
+        has_declaration: false,
     });
     for item in &im.items {
         if let syn::ImplItem::Fn(m) = item {
