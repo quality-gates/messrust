@@ -126,23 +126,64 @@ pub(crate) fn test_module_ranges(file: &syn::File) -> TestModuleRanges {
 }
 
 
+fn eval_cfg_meta_for_test(meta: &syn::Meta, test_val: bool) -> bool {
+    match meta {
+        syn::Meta::Path(path) => {
+            if path.is_ident("test") {
+                test_val
+            } else {
+                true
+            }
+        }
+        syn::Meta::NameValue(_) => true,
+        syn::Meta::List(list) => {
+            let Ok(inners) = list
+                .parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
+            else {
+                return true;
+            };
+            if list.path.is_ident("not") {
+                if let Some(first) = inners.first() {
+                    !eval_cfg_meta_for_test(first, test_val)
+                } else {
+                    true
+                }
+            } else if list.path.is_ident("all") {
+                inners.iter().all(|inner| eval_cfg_meta_for_test(inner, test_val))
+            } else if list.path.is_ident("any") {
+                inners.iter().any(|inner| eval_cfg_meta_for_test(inner, test_val))
+            } else {
+                true
+            }
+        }
+    }
+}
+
+fn eval_cfg_attribute_for_test(attribute: &syn::Attribute, test_val: bool) -> bool {
+    let Ok(metas) = attribute
+        .parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
+    else {
+        return true;
+    };
+    metas.iter().all(|meta| eval_cfg_meta_for_test(meta, test_val))
+}
+
+pub(crate) fn is_test_module(attrs: &[syn::Attribute]) -> bool {
+    let cfg_attrs: Vec<_> = attrs.iter().filter(|a| a.path().is_ident("cfg")).collect();
+    if cfg_attrs.is_empty() {
+        return false;
+    }
+    let compiles_in_prod = cfg_attrs.iter().all(|a| eval_cfg_attribute_for_test(a, false));
+    let compiles_in_test = cfg_attrs.iter().all(|a| eval_cfg_attribute_for_test(a, true));
+    !compiles_in_prod && compiles_in_test
+}
+
 pub(crate) fn collect_test_module_ranges(items: &[Item], ranges: &mut Vec<(usize, usize)>) {
     for item in items {
         let Item::Mod(module) = item else {
             continue;
         };
-        let is_test = module.attrs.iter().any(|attribute| {
-            if !attribute.path().is_ident("cfg") {
-                return false;
-            }
-            attribute.meta.require_list().ok().is_some_and(|list| {
-                list.tokens
-                    .to_string()
-                    .split(|c: char| !c.is_ascii_alphanumeric())
-                    .any(|part| part == "test")
-            })
-        });
-        if is_test {
+        if is_test_module(&module.attrs) {
             let span = module.span();
             ranges.push((span.start().line, span.end().line));
         }
@@ -211,6 +252,45 @@ pub(crate) fn apply_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_test_module_distinguishes_positive_and_negative_test_guards() {
+        let test_mod: syn::ItemMod = syn::parse_quote!(
+            #[cfg(test)]
+            mod a;
+        );
+        assert!(is_test_module(&test_mod.attrs));
+
+        let not_test_mod: syn::ItemMod = syn::parse_quote!(
+            #[cfg(not(test))]
+            mod b;
+        );
+        assert!(!is_test_module(&not_test_mod.attrs));
+
+        let compound_test: syn::ItemMod = syn::parse_quote!(
+            #[cfg(all(test, feature = "foo"))]
+            mod c;
+        );
+        assert!(is_test_module(&compound_test.attrs));
+
+        let compound_not_test: syn::ItemMod = syn::parse_quote!(
+            #[cfg(all(not(test), feature = "foo"))]
+            mod d;
+        );
+        assert!(!is_test_module(&compound_not_test.attrs));
+
+        let comma_test: syn::ItemMod = syn::parse_quote!(
+            #[cfg(test, feature = "foo")]
+            mod e;
+        );
+        assert!(is_test_module(&comma_test.attrs));
+
+        let regular_mod: syn::ItemMod = syn::parse_quote!(
+            #[cfg(feature = "foo")]
+            mod f;
+        );
+        assert!(!is_test_module(&regular_mod.attrs));
+    }
 
     #[test]
     fn many_production_findings_use_logarithmic_range_queries() {

@@ -513,6 +513,45 @@ fn ignore_tests_skips_cfg_test_modules_inside_production_files() {
 }
 
 #[test]
+fn ignore_tests_does_not_skip_cfg_not_test_modules() {
+    let dir = TempDir::new().unwrap();
+    let not_test = fixture_with_params(11).replacen("entry_point", "not_test", 1);
+    let source = format!("#[cfg(not(test))]\nmod production_only {{\n{not_test}}}\n");
+    let path = write_file(dir.path(), "src.rs", &source);
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("not_test"), "stdout={out:?}");
+}
+
+#[test]
+fn ignore_tests_handles_compound_cfg_test_and_not_test_modules() {
+    let dir = TempDir::new().unwrap();
+    let not_test = fixture_with_params(11).replacen("entry_point", "not_test", 1);
+    let test_only = fixture_with_params(12).replacen("entry_point", "test_only", 1);
+    let source = format!(
+        "#[cfg(all(not(test), feature = \"foo\"))]\nmod production_only {{\n{not_test}}}\n\
+         #[cfg(all(test, feature = \"foo\"))]\nmod test_only {{\n{test_only}}}\n"
+    );
+    let path = write_file(dir.path(), "src.rs", &source);
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("not_test"), "stdout={out:?}");
+    assert!(!out.contains("test_only"), "stdout={out:?}");
+}
+
+#[test]
 fn rust_policy_allows_short_local_names_but_opinionated_policy_reports_them() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "fixture.rs", "fn main() { let x = 1; let _ = x; }\n");
