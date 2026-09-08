@@ -1623,7 +1623,61 @@ fn split_ref(ref_str: &str) -> (String, String) {
             return (base.to_string(), ref_str[idx + 1..].to_string());
         }
     }
+    if let Some(ruleset) = builtin_ruleset_for_rule(ref_str) {
+        return (ruleset.to_string(), ref_str.to_string());
+    }
     (ref_str.to_string(), String::new())
+}
+
+fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
+    match rule_name {
+        "CyclomaticComplexity"
+        | "NPathComplexity"
+        | "ExcessiveMethodLength"
+        | "ExcessiveClassLength"
+        | "ExcessiveParameterList"
+        | "ExcessivePublicCount"
+        | "TooManyFields"
+        | "TooManyMethods"
+        | "TooManyPublicMethods"
+        | "ExcessiveClassComplexity" => Some("codesize"),
+
+        "ShortClassName"
+        | "LongClassName"
+        | "ShortVariable"
+        | "LongVariable"
+        | "ShortMethodName"
+        | "ConstantNamingConventions"
+        | "BooleanGetMethodName" => Some("naming"),
+
+        "UnusedPrivateField"
+        | "UnusedLocalVariable"
+        | "UnusedPrivateMethod"
+        | "UnusedFormalParameter" => Some("unusedcode"),
+
+        "BooleanArgumentFlag"
+        | "ElseExpression"
+        | "IfStatementAssignment"
+        | "DuplicatedArrayKey"
+        | "StaticAccess" => Some("cleancode"),
+
+        "ExitExpression"
+        | "GotoStatement"
+        | "CountInLoopExpression"
+        | "DevelopmentCodeFragment"
+        | "EmptyCatchBlock"
+        | "CouplingBetweenObjects"
+        | "GlobalVariable"
+        | "LackOfCohesionOfMethods" => Some("design"),
+
+        "CamelCaseClassName"
+        | "CamelCaseMethodName"
+        | "CamelCasePropertyName"
+        | "CamelCaseParameterName"
+        | "CamelCaseVariableName" => Some("controversial"),
+
+        _ => None,
+    }
 }
 
 fn is_resolvable(ident: &str) -> bool {
@@ -1915,5 +1969,32 @@ mod tests {
         assert!(name_trie_contains(&blockers, &left_name));
         assert!(name_trie_contains(&blockers, &right_name));
         assert_ne!(projected.id, 0);
+    }
+
+    #[test]
+    fn all_builtin_rules_are_indexed_for_bare_resolution() {
+        let builtins = [
+            ("codesize", include_str!("../rulesets/codesize.xml")),
+            ("naming", include_str!("../rulesets/naming.xml")),
+            ("unusedcode", include_str!("../rulesets/unusedcode.xml")),
+            ("cleancode", include_str!("../rulesets/cleancode.xml")),
+            ("design", include_str!("../rulesets/design.xml")),
+            ("controversial", include_str!("../rulesets/controversial.xml")),
+        ];
+        let mut count = 0;
+        for (set_name, xml) in builtins {
+            let doc = roxmltree::Document::parse(xml).unwrap();
+            for node in doc.descendants().filter(|n| n.has_tag_name("rule")) {
+                if let Some(rule_name) = node.attribute("name") {
+                    count += 1;
+                    assert_eq!(
+                        builtin_ruleset_for_rule(rule_name),
+                        Some(set_name),
+                        "rule '{rule_name}' in '{set_name}' must resolve to its ruleset"
+                    );
+                }
+            }
+        }
+        assert_eq!(count, 39, "all 39 builtin rules should be indexed");
     }
 }

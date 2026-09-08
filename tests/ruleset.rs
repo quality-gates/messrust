@@ -958,3 +958,129 @@ fn custom_ruleset_file_named_codesize_is_loaded_from_disk() {
     assert!(out.contains("Custom Parameter Limit:"), "stdout={out:?}");
 }
 
+#[test]
+fn custom_xml_ruleset_resolves_rule_by_bare_name() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fixture.rs",
+        "fn test() {\n    let a_really_long_variable_name_here = 1;\n}\n",
+    );
+    let xml = dir.path().join("policy.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="team policy">
+  <rule ref="LongVariable"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("LongVariable"), "stdout={out:?}");
+}
+
+#[test]
+fn custom_xml_ruleset_resolves_bare_rule_with_priority_and_property_overrides() {
+    let dir = TempDir::new().unwrap();
+    // Variable with 32 chars: passes when maximum is set to 40.
+    let clean_path = write_file(
+        dir.path(),
+        "clean.rs",
+        "fn test() {\n    let variable_with_thirty_two_chars_x = 1;\n}\n",
+    );
+    // Variable with 45 chars: violates when maximum is set to 40.
+    let viol_path = write_file(
+        dir.path(),
+        "viol.rs",
+        "fn test() {\n    let variable_with_forty_five_characters_here_now = 1;\n}\n",
+    );
+    let xml = dir.path().join("policy.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="team policy">
+  <rule ref="LongVariable">
+    <priority>2</priority>
+    <properties>
+      <property name="maximum" value="40"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code_clean, out_clean, err_clean) =
+        run_cli(&[clean_path.to_str().unwrap(), "json", xml.to_str().unwrap()]);
+    assert_eq!(code_clean, EXIT_SUCCESS, "stderr={err_clean:?}");
+    assert!(!out_clean.contains("LongVariable"), "stdout={out_clean:?}");
+
+    let (code_viol, out_viol, err_viol) =
+        run_cli(&[viol_path.to_str().unwrap(), "json", xml.to_str().unwrap()]);
+    assert_eq!(code_viol, EXIT_VIOLATION, "stderr={err_viol:?}");
+    assert!(out_viol.contains("LongVariable"), "stdout={out_viol:?}");
+    assert!(out_viol.contains("\"priority\": 2"), "stdout={out_viol:?}");
+}
+
+#[test]
+fn custom_xml_ruleset_bare_unknown_rule_warns_cleanly_without_panicking() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", "fn test() {}\n");
+    let xml = dir.path().join("unknown.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Unknown">
+  <rule ref="NotARealRule"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+        "--verbose",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("Cannot resolve ref: NotARealRule"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn custom_xml_ruleset_resolves_bare_rules_across_all_builtin_categories() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fixture.rs",
+        "fn test() {\n    let a_really_long_variable_name_here = 1;\n}\n",
+    );
+    let xml = dir.path().join("all_categories.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="multi-category">
+  <rule ref="CyclomaticComplexity"/>
+  <rule ref="LongVariable"/>
+  <rule ref="UnusedLocalVariable"/>
+  <rule ref="BooleanArgumentFlag"/>
+  <rule ref="ExitExpression"/>
+  <rule ref="CamelCaseClassName"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("LongVariable"), "stdout={out:?}");
+}
+
+
+
