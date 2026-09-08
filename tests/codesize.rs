@@ -956,6 +956,127 @@ fn excessive_class_length_default_ignore_whitespace_is_false() {
 }
 
 #[test]
+fn excessive_class_length_inherent_impl_without_struct_def_does_not_double_count() {
+    let dir = TempDir::new().unwrap();
+    let mut methods = String::new();
+    for i in 0..10 {
+        methods.push_str(&format!(
+            "    fn method_{i}(&self) {{\n        let _a = {i};\n        let _b = {i};\n        let _c = {i};\n    }}\n"
+        ));
+    }
+    let src = format!("impl ExternalType {{\n{methods}}}\n");
+    assert_eq!(src.lines().count(), 52);
+    let path = write_file(dir.path(), "external_impl.rs", &src);
+    let xml = write_file(
+        dir.path(),
+        "ecl.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl">
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="60"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("ExcessiveClassLength"), "stdout={out:?}");
+}
+
+#[test]
+fn excessive_class_length_struct_with_multiple_impls_counts_accurately() {
+    let dir = TempDir::new().unwrap();
+    let src = r#"struct MultiImpl {
+    a: i32,
+    b: i32,
+    c: i32,
+}
+
+impl MultiImpl {
+    fn m1(&self) {
+        let _a = 1;
+        let _b = 2;
+        let _x = 0;
+    }
+}
+
+impl MultiImpl {
+    fn m2(&self) {
+        let _c = 3;
+        let _d = 4;
+        let _y = 0;
+    }
+}
+"#;
+    let path = write_file(dir.path(), "multi_impl.rs", src);
+    let xml15 = ecl_raw_xml(dir.path(), "ecl15.xml", 15);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml15.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassLength",
+        "The class MultiImpl has 15 lines of code. Current threshold is 15. Avoid really long classes.",
+    );
+
+    let xml16 = ecl_raw_xml(dir.path(), "ecl16.xml", 16);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml16.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("ExcessiveClassLength"), "stdout={out:?}");
+}
+
+#[test]
+fn excessive_class_length_inherent_impl_preserves_effective_line_counting() {
+    let dir = TempDir::new().unwrap();
+    let src = "impl ExternalWs {\n    // comment line\n\n    fn work(&self) {\n        // inner comment\n        let _x = 1;\n\n    }\n    // trailing comment\n}\n";
+    let path = write_file(dir.path(), "effective_impl.rs", src);
+    let xml = write_file(
+        dir.path(),
+        "ecl_ws.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl_ws">
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="5"/>
+      <property name="ignore-whitespace" value="true"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassLength",
+        "The class ExternalWs has 5 lines of code. Current threshold is 5. Avoid really long classes.",
+    );
+
+    let xml6 = write_file(
+        dir.path(),
+        "ecl_ws6.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="ecl_ws6">
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="6"/>
+      <property name="ignore-whitespace" value="true"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml6.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("ExcessiveClassLength"), "stdout={out:?}");
+}
+
+#[test]
 fn excessive_public_count_fires_at_forty_five_with_exact_message() {
     let dir = TempDir::new().unwrap();
     let fields: String = (0..45).map(|i| format!("    pub f{i}: i32,\n")).collect();

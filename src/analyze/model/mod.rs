@@ -201,6 +201,7 @@ pub(crate) struct TypeModel<'a> {
     pub(crate) public_fields: usize,
     pub(crate) fields: Vec<FieldInfo>,
     pub(crate) methods: Vec<MethodRef<'a>>,
+    pub(crate) has_declaration: bool,
 }
 
 
