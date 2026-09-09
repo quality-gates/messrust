@@ -140,6 +140,81 @@ fn unresolvable_ref_warns_cannot_resolve_and_does_not_error() {
 }
 
 #[test]
+fn relative_ref_to_sibling_xml_resolves_against_the_referencing_file() {
+    // A <rule ref="b.xml"/> inside a.xml must resolve against the
+    // directory of a.xml, not the process working directory. The rulesets
+    // live in a temp directory, so the test process cwd never matches.
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    write_file(
+        dir.path(),
+        "nested/b.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Sibling">
+  <rule name="ExcessiveParameterList"
+        message="Too many parameters: {0}"
+        class="PHPMD\Rule\Design\LongParameterList"/>
+</ruleset>
+"#,
+    );
+    let parent = write_file(
+        dir.path(),
+        "nested/a.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Parent">
+  <rule ref="b.xml"/>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", parent.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+    assert!(!err.contains("Cannot resolve ref"), "stderr={err:?}");
+}
+
+#[test]
+fn relative_ref_in_subdirectory_resolves_against_the_referencing_file() {
+    // A ref may name a file inside a sub-directory of the referencing
+    // ruleset, and refs inside that referenced file must resolve against
+    // its own directory, not the process cwd or the outer ruleset's dir.
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    write_file(
+        dir.path(),
+        "nested/sub/c.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Leaf">
+  <rule name="ExcessiveParameterList"
+        message="Too many parameters: {0}"
+        class="PHPMD\Rule\Design\LongParameterList"/>
+</ruleset>
+"#,
+    );
+    write_file(
+        dir.path(),
+        "nested/sub/b.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Middle">
+  <rule ref="c.xml"/>
+</ruleset>
+"#,
+    );
+    let parent = write_file(
+        dir.path(),
+        "nested/a.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Parent">
+  <rule ref="sub/b.xml"/>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", parent.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+    assert!(!err.contains("Cannot resolve ref"), "stderr={err:?}");
+}
+
+#[test]
 fn property_value_reads_nested_value_element_when_attribute_absent() {
     // property_value falls back to a nested <value> element's text when
     // the property has no `value` attribute.
