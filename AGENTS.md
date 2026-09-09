@@ -40,7 +40,7 @@ Standard commands (run from repo root):
   takes ~20 s).
 * Lint: `cargo clippy --all-targets` and `cargo fmt --check`.
 * Development environment: do all development work, debugging, etc. in a Docker container with capped resources (for example: `docker run --rm -it --cpus=2 --memory=2g -v "$PWD":/workspace messrust-dev`).
-* Build cruft: always clean up build target cruft after work is done (run `cargo clean` or delete the `target/` directory).
+* Build cruft: always clean up build target cruft after work is done (run `cargo clean` or delete the `target/` directory). `mutarust` mutation runs rebuild the crate once per mutant, so the target directory can grow by tens of GB in one run: end any script that launches a mutation run with `cargo clean`.
 
 Caveat: under stable `1.97`, `cargo fmt --check` reports diffs and `cargo
 clippy` reports warnings on existing code. This is toolchain-version drift from
