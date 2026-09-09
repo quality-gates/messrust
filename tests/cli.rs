@@ -32,6 +32,40 @@ fn fixture_with_params(n: usize) -> String {
     format!("fn entry_point({}) {{}}\n", params.join(", "))
 }
 
+fn deeply_nested_parentheses(depth: usize) -> String {
+    let mut source = String::from("fn main() { ");
+    source.extend(std::iter::repeat_n('(', depth));
+    source.push('1');
+    source.extend(std::iter::repeat_n(')', depth));
+    source.push_str("; }\n");
+    source
+}
+
+fn deeply_nested_struct_literals(depth: usize) -> String {
+    let mut source = String::from("struct S { field: Option<Box<S>> }\nfn main() { let value = ");
+    source.extend(std::iter::repeat_n("S { field: Some(", depth));
+    source.push_str("None");
+    source.extend(std::iter::repeat_n(") }", depth));
+    source.push_str("; }\n");
+    source
+}
+
+fn deeply_nested_closures(depth: usize) -> String {
+    let mut source = String::from("fn main() { let value = ");
+    source.extend(std::iter::repeat_n("|value| ", depth));
+    source.push_str("value; }\n");
+    source
+}
+
+fn deeply_nested_if_blocks(depth: usize) -> String {
+    let mut source = String::from("fn main() { ");
+    source.extend(std::iter::repeat_n("if true { ", depth));
+    source.push_str("1;");
+    source.extend(std::iter::repeat_n(" }", depth));
+    source.push_str(" }\n");
+    source
+}
+
 #[test]
 fn version_prints_package_version_and_exits_zero() {
     let (code, out, err) = run_cli(&["--version"]);
@@ -229,6 +263,63 @@ fn clean_fixture_exits_zero() {
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn deeply_nested_expression_is_processing_error_and_other_file_is_analyzed() {
+    let dir = TempDir::new().unwrap();
+    let deep = write_file(dir.path(), "deep.rs", &deeply_nested_parentheses(2683));
+    let valid = write_file(dir.path(), "valid.rs", &fixture_with_params(11));
+    let paths = format!("{},{}", deep.display(), valid.display());
+
+    let (code, out, err) = run_cli(&[&paths, "text", "codesize"]);
+
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(
+        out.contains(&format!("{}\t-\t", deep.display())),
+        "deep file must produce a processing error: stdout={out:?}"
+    );
+    assert!(
+        out.contains(valid.to_str().unwrap()) && out.contains("ExcessiveParameterList"),
+        "the valid file must still be analyzed: stdout={out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn deeply_nested_expression_shapes_are_processing_errors() {
+    let cases = [
+        ("parentheses.rs", deeply_nested_parentheses(2683)),
+        ("struct.rs", deeply_nested_struct_literals(914)),
+        ("closures.rs", deeply_nested_closures(1952)),
+        ("if.rs", deeply_nested_if_blocks(2000)),
+    ];
+
+    for (name, source) in cases {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(dir.path(), name, &source);
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+
+        assert_eq!(code, EXIT_ERROR, "name={name} stdout={out:?} stderr={err:?}");
+        assert!(
+            out.contains(&format!("{}\t-\t", path.display())),
+            "deep file must produce a processing error: name={name} stdout={out:?}"
+        );
+        assert!(err.is_empty(), "name={name} stderr={err:?}");
+    }
+}
+
+#[test]
+fn shallow_nested_expression_is_still_analyzed() {
+    let dir = TempDir::new().unwrap();
+    let source = fixture_with_params(11).replacen("{}", "{ let value = (((1))); }", 1);
+    let path = write_file(dir.path(), "shallow.rs", &source);
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+
+    assert_eq!(code, EXIT_VIOLATION, "stdout={out:?} stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
     assert!(err.is_empty(), "stderr={err:?}");
 }
 
