@@ -956,6 +956,90 @@ fn excessive_class_length_default_ignore_whitespace_is_false() {
 }
 
 #[test]
+fn excessive_class_length_trait_methods_inside_trait_span_count_once() {
+    let dir = TempDir::new().unwrap();
+    // Issue #118: default trait methods sit inside the trait span and must not
+    // be added again. 19 physical lines; the four method bodies span 12 lines
+    // inside that span.
+    let src = r#"pub trait Storage {
+    /// Save one record.
+    fn save(&self, record: u32) -> u32 {
+        record
+    }
+
+    /// Load one record.
+    fn load(&self, key: u32) -> u32 {
+        key
+    }
+
+    fn count_all(&self) -> u32 {
+        0
+    }
+
+    fn clear_all(&self) {
+        // nothing here
+    }
+}
+"#;
+    assert_eq!(src.lines().count(), 19);
+    let path = write_file(dir.path(), "storage.rs", src);
+    let xml = ecl_raw_xml(dir.path(), "ecl8.xml", 8);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassLength",
+        "The class Storage has 19 lines of code. Current threshold is 8. Avoid really long classes.",
+    );
+
+    // Quiet side of the boundary: one line more than the trait span.
+    let xml20 = ecl_raw_xml(dir.path(), "ecl20.xml", 20);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml20.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("ExcessiveClassLength"), "stdout={out:?}");
+}
+
+#[test]
+fn excessive_class_length_struct_with_inherent_impl_counts_combined_once() {
+    let dir = TempDir::new().unwrap();
+    // Struct span (4 lines) + impl methods outside the struct span
+    // (3 lines each) = 10. No in-span lines are added a second time.
+    let src = r#"struct Keeper {
+    a: i32,
+    b: i32,
+}
+
+impl Keeper {
+    fn m1(&self) {
+        let _a = 1;
+    }
+
+    fn m2(&self) {
+        let _b = 2;
+    }
+}
+"#;
+    let path = write_file(dir.path(), "keeper.rs", src);
+    let xml = ecl_raw_xml(dir.path(), "ecl8.xml", 10);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveClassLength",
+        "The class Keeper has 10 lines of code. Current threshold is 10. Avoid really long classes.",
+    );
+
+    let xml9 = ecl_raw_xml(dir.path(), "ecl9.xml", 11);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml9.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("ExcessiveClassLength"), "stdout={out:?}");
+}
+
+#[test]
 fn excessive_class_length_inherent_impl_without_struct_def_does_not_double_count() {
     let dir = TempDir::new().unwrap();
     let mut methods = String::new();
