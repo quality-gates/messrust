@@ -4,6 +4,7 @@
 mod helpers;
 mod kind;
 mod model;
+mod parse;
 mod rules;
 
 pub use kind::RuleKind;
@@ -62,7 +63,7 @@ pub(crate) fn analyze_one(
     ignore_tests: bool,
 ) -> Result<Vec<Violation>, String> {
     let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let file = syn::parse_file(&src).map_err(|e| e.to_string())?;
+    let file = parse::parse_file(&src)?;
     let file_name = path.display().to_string();
     let model = FileModel::from_file(&file, &src);
     let mut violations = Vec::new();
