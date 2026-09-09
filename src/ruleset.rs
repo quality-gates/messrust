@@ -1053,10 +1053,11 @@ impl<'a> RulesetLoader<'a> {
             .active_indices
             .insert(node.clone(), self.expansion.active.len());
         self.expansion.active.push(node);
+        let base = file_ruleset_dir(source_id);
         let result = if rule_name.is_empty() {
-            self.add_ruleset_rules(out, source, source_name)
+            self.add_ruleset_rules(out, source, source_name, base.as_deref())
         } else {
-            self.add_named_rule(out, source, source_name, rule_name)
+            self.add_named_rule(out, source, source_name, rule_name, base.as_deref())
         };
         let node = self
             .expansion
@@ -1086,8 +1087,9 @@ impl<'a> RulesetLoader<'a> {
         out: &mut Vec<LoadedRule>,
         rule: &XmlRule,
         named: bool,
+        base: Option<&Path>,
     ) -> Result<ExpansionResult, String> {
-        let Some(target) = self.reference_target(rule)? else {
+        let Some(target) = self.reference_target(rule, base)? else {
             return Ok(empty_summary());
         };
         let key = expansion_key(&target.source_id, &target.rule_name);
@@ -1112,11 +1114,16 @@ impl<'a> RulesetLoader<'a> {
         self.finish_boundary(result?, rule, named)
     }
 
-    fn reference_target(&mut self, rule: &XmlRule) -> Result<Option<ReferenceTarget>, String> {
-        let (base, rule_name) = split_ref(&rule.ref_path);
-        let (source_id, display_name, source) = match self.source(&base) {
+    fn reference_target(
+        &mut self,
+        rule: &XmlRule,
+        base: Option<&Path>,
+    ) -> Result<Option<ReferenceTarget>, String> {
+        let (ident, rule_name) = split_ref(base, &rule.ref_path);
+        let ident = resolve_ref(base, &ident);
+        let (source_id, display_name, source) = match self.source(&ident) {
             Ok(source) => source,
-            Err(error) if is_resolvable(&base) => return Err(error),
+            Err(error) if is_resolvable(base, &ident) => return Err(error),
             Err(_) => {
                 (self.warn)(format!("Cannot resolve ref: {}", rule.ref_path));
                 return Ok(None);
@@ -1182,12 +1189,13 @@ impl<'a> RulesetLoader<'a> {
         source: &XmlRuleset,
         source_name: &str,
         rule_name: &str,
+        base: Option<&Path>,
     ) -> Result<ExpansionResult, String> {
         let Some(source_rule) = find_source_rule(source, rule_name) else {
             return Ok(empty_summary());
         };
         if !source_rule.ref_path.is_empty() {
-            return self.add_ref_with_boundary(out, source_rule, true);
+            return self.add_ref_with_boundary(out, source_rule, true, base);
         }
         Ok(self
             .emit_rule(out, source_name, source_rule, true)
@@ -1199,6 +1207,7 @@ impl<'a> RulesetLoader<'a> {
         out: &mut Vec<LoadedRule>,
         source: &XmlRuleset,
         source_name: &str,
+        base: Option<&Path>,
     ) -> Result<ExpansionResult, String> {
         let mut children = Vec::new();
         let mut local_rules = Vec::new();
@@ -1214,7 +1223,7 @@ impl<'a> RulesetLoader<'a> {
                 continue;
             }
             if !source_rule.ref_path.is_empty() {
-                children.push(self.add_ref_with_boundary(out, source_rule, false)?);
+                children.push(self.add_ref_with_boundary(out, source_rule, false, base)?);
             } else if !source_rule.class.is_empty() {
                 if let Some(rule) = self.emit_rule(out, source_name, source_rule, false) {
                     local_rules.push(rule);
@@ -1613,20 +1622,42 @@ fn normalize_builtin_key(ident: &str) -> Option<String> {
     }
 }
 
-fn split_ref(ref_str: &str) -> (String, String) {
-    if is_resolvable(ref_str) {
+fn split_ref(base: Option<&Path>, ref_str: &str) -> (String, String) {
+    if is_resolvable(base, ref_str) {
         return (ref_str.to_string(), String::new());
     }
     if let Some(idx) = ref_str.rfind('/') {
-        let base = &ref_str[..idx];
-        if is_resolvable(base) {
-            return (base.to_string(), ref_str[idx + 1..].to_string());
+        let base_ident = &ref_str[..idx];
+        if is_resolvable(base, base_ident) {
+            return (base_ident.to_string(), ref_str[idx + 1..].to_string());
         }
     }
     if let Some(ruleset) = builtin_ruleset_for_rule(ref_str) {
         return (ruleset.to_string(), ref_str.to_string());
     }
     (ref_str.to_string(), String::new())
+}
+
+/// Directory of a loaded file ruleset, from its canonical source id.
+/// Builtin rulesets yield `None`, so their refs keep current resolution.
+fn file_ruleset_dir(source_id: &str) -> Option<PathBuf> {
+    let path = Path::new(source_id);
+    if path.is_absolute() && path.is_file() {
+        path.parent().map(|dir| dir.to_path_buf())
+    } else {
+        None
+    }
+}
+
+/// Spell a ref ident so `is_resolvable`/`read_ruleset` see the same file
+/// the referencing ruleset sees. Idents that already resolve on their own
+/// (absolute, a file relative to the cwd, or a builtin) are unchanged.
+fn resolve_ref(base: Option<&Path>, ident: &str) -> String {
+    if base.is_none() || Path::new(ident).is_absolute() || is_resolvable(None, ident) {
+        return ident.to_string();
+    }
+    base.map(|dir| dir.join(ident).to_string_lossy().into_owned())
+        .unwrap_or_else(|| ident.to_string())
 }
 
 fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
@@ -1680,8 +1711,10 @@ fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
     }
 }
 
-fn is_resolvable(ident: &str) -> bool {
-    builtin_xml(ident).is_some() || Path::new(ident).is_file()
+fn is_resolvable(base: Option<&Path>, ident: &str) -> bool {
+    builtin_xml(ident).is_some() || Path::new(ident).is_file() || {
+        base.map(|dir| dir.join(ident).is_file()).unwrap_or(false)
+    }
 }
 
 fn parse_ruleset(xml: &str) -> Result<XmlRuleset, String> {
