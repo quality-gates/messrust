@@ -66,9 +66,9 @@ method. Blank and comment-only lines count by default; set
 `ignore-whitespace=true` in a custom ruleset to skip them.
 
 `ExcessiveClassLength` applies to `struct`, `union`, `enum`, and `trait`. It
-adds the type span and the spans of methods attached to that type. For a trait,
-method declarations already sit inside the trait span and are counted again
-when their method spans are added.
+adds the type span and the spans of methods attached to that type. A method
+whose span sits fully inside the type span counts once; for a trait, the
+default method bodies already sit inside the trait span and add nothing.
 
 A long item is not always wrong. Generated tables, protocol maps, and direct
 translations can stay clear at size. Raise the threshold or suppress the one

@@ -764,8 +764,10 @@ fn trait_after_impl_updates_end_line_for_class_length() {
     );
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
-    // Span + per-method lines; end_line must come from the trait, not the impl.
-    assert!(out.contains("has 11 lines of code"), "stdout={out:?}");
+    // Trait span (lines 2-7, 6 lines) + the impl method on line 1, which sits
+    // outside the span. In-span trait method lines count once (issue #118);
+    // end_line must come from the trait, not the impl.
+    assert!(out.contains("has 7 lines of code"), "stdout={out:?}");
     assert_finding(&out, &path, 2, "ExcessiveClassLength", "Host");
 }
 

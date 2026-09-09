@@ -25,7 +25,9 @@ pub(crate) fn type_loc(t: &TypeModel<'_>, model: &FileModel<'_>, ignore_ws: bool
         t.end_line.saturating_sub(t.begin_line).saturating_add(1)
     };
     for m in &t.methods {
-        if !t.has_declaration && m.begin_line >= t.begin_line && m.end_line <= t.end_line {
+        // A method whose span sits fully inside the type span is already
+        // counted by the type span (for example a default trait method).
+        if m.begin_line >= t.begin_line && m.end_line <= t.end_line {
             continue;
         }
         loc += if ignore_ws {
