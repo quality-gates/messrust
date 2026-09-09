@@ -687,6 +687,126 @@ fn effective_lines_of_code_skips_a_multiline_block_comment() {
     assert!(out.contains("has 4 lines of code"), "stdout={out:?}");
 }
 
+#[test]
+fn effective_lines_of_code_ignores_comment_markers_inside_strings() {
+    let dir = TempDir::new().unwrap();
+    let body: String = (0..30)
+        .map(|i| format!("    let value_{i} = {i};\n"))
+        .collect();
+    let control = write_file(
+        dir.path(),
+        "string_control.rs",
+        &format!(
+            "fn long_one() {{\n    let text = \"harmless\";\n{}}}\n",
+            body
+        ),
+    );
+    let probe = write_file(
+        dir.path(),
+        "string_probe.rs",
+        &format!(
+            "fn long_one() {{\n    let text = \"/* looks like a comment\";\n{}}}\n",
+            body
+        ),
+    );
+    let xml = eml_ignore_ws_xml(dir.path(), "string_probe.xml", 20);
+    for (path, name) in [(control, "control"), (probe, "probe")] {
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+        assert_eq!(code, EXIT_VIOLATION, "{name}: stderr={err:?}");
+        // 33 raw lines, all code: the `/*` in the string must not open a
+        // block comment and swallow the lines after it.
+        assert_finding(
+            &out,
+            &path,
+            1,
+            "ExcessiveMethodLength",
+            "The function long_one() has 33 lines of code. Current threshold is set to 20. Avoid really long methods.",
+        );
+    }
+}
+
+#[test]
+fn effective_lines_of_code_ignores_comment_markers_inside_raw_strings() {
+    let dir = TempDir::new().unwrap();
+    let body: String = (0..28)
+        .map(|i| format!("    let value_{i} = {i};\n"))
+        .collect();
+    let path = write_file(
+        dir.path(),
+        "raw_string.rs",
+        &format!(
+            "fn long_one() {{\n    let text = r\"/* looks\";\n{}}}\n",
+            body
+        ),
+    );
+    let xml = eml_ignore_ws_xml(dir.path(), "raw_string.xml", 20);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "ExcessiveMethodLength",
+        "The function long_one() has 31 lines of code. Current threshold is set to 20. Avoid really long methods.",
+    );
+}
+
+#[test]
+fn effective_lines_of_code_counts_multiline_raw_string_content_but_not_comments() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_multi.rs",
+        "fn f() {\n    let s = r#\"\n    /* still string content\n    \"#;\n    let a = 1;\n}\n",
+    );
+    let xml = eml_ignore_ws_xml(dir.path(), "raw_multi.xml", 1);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // 6 raw lines, all code: raw string content counts, and the `/*` inside
+    // it must not open a comment that swallows the lines after the string.
+    assert!(out.contains("has 6 lines of code"), "stdout={out:?}");
+}
+
+#[test]
+fn effective_lines_of_code_ignores_comment_markers_inside_byte_strings() {
+    let dir = TempDir::new().unwrap();
+    let body: String = (0..28)
+        .map(|i| format!("    let value_{i} = {i};\n"))
+        .collect();
+    for (literal, name) in [("b\"/* looks\"", "byte"), ("br\"/* looks\"", "byte_raw")] {
+        let path = write_file(
+            dir.path(),
+            &format!("{name}_string.rs"),
+            &format!("fn long_one() {{\n    let text = {literal};\n{}}}\n", body),
+        );
+        let xml = eml_ignore_ws_xml(dir.path(), &format!("{name}_string.xml"), 20);
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+        assert_eq!(code, EXIT_VIOLATION, "{name}: stderr={err:?}");
+        assert_finding(
+            &out,
+            &path,
+            1,
+            "ExcessiveMethodLength",
+            "The function long_one() has 31 lines of code. Current threshold is set to 20. Avoid really long methods.",
+        );
+    }
+}
+
+#[test]
+fn effective_lines_of_code_comment_after_a_string_with_comment_ender() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "string_end.rs",
+        "fn f() {\n    let s = \"*/\";\n    /* comment\n    still */\n    let a = 1;\n}\n",
+    );
+    let xml = eml_ignore_ws_xml(dir.path(), "string_end.xml", 1);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    // Lines 1, 2, 5, 6 have code; lines 3-4 are the comment.
+    assert!(out.contains("has 4 lines of code"), "stdout={out:?}");
+}
+
 // ----- Threshold boundaries and exact messages (mutation gate) ------------
 
 fn params_src(name: &str, n: usize) -> String {

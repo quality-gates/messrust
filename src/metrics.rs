@@ -14,6 +14,8 @@
 use syn::visit::Visit;
 use syn::{BinOp, Block, Expr, ExprIf, Pat, Stmt};
 
+use crate::suppressions::{char_literal_end, lifetime_end, skip_quoted};
+
 #[cfg(test)]
 use std::cell::Cell;
 
@@ -207,12 +209,12 @@ pub(crate) fn effective_line_prefix(src: &str) -> Vec<usize> {
     let mut prefix = Vec::new();
     prefix.push(0);
     let mut count = 0usize;
-    let mut in_block = false;
+    let mut state = LineState::Code;
     for raw in src.split('\n') {
         #[cfg(test)]
         EFFECTIVE_LINE_SCANS.with(|scans| scans.set(scans.get() + 1));
-        let (has_code, after) = line_has_code(raw, in_block);
-        in_block = after;
+        let (has_code, after) = line_has_code(raw, state);
+        state = after;
         if has_code {
             count += 1;
         }
@@ -235,43 +237,171 @@ pub(crate) fn effective_line_count(prefix: &[usize], start_line: usize, end_line
     prefix[end].saturating_sub(prefix[start_line - 1])
 }
 
-fn line_has_code(line: &str, in_block: bool) -> (bool, bool) {
-    if !in_block {
-        return scan_visible_line(line);
-    }
-    match line.find("*/") {
-        Some(end) => scan_visible_line(&line[end + 2..]),
-        None => (false, true),
+/// Scan state carried from one raw line to the next. String literals are
+/// code, not comments: a `//` or `/*` inside a quoted literal must not open
+/// comment state, and comment text is not string content, so `"` inside a
+/// block comment must not open a string. This mirrors the directive scanner
+/// in `suppressions.rs` and rustc's lexer.
+#[derive(Clone, Copy)]
+enum LineState {
+    /// Not inside a comment or a raw string carried over from earlier lines.
+    Code,
+    /// Inside a block comment that has not closed yet.
+    Block,
+    /// Inside a raw string that continues on the next line.
+    RawString { hashes: usize },
+}
+
+fn line_has_code(line: &str, state: LineState) -> (bool, LineState) {
+    match state {
+        LineState::Block => match line.find("*/") {
+            Some(end) => scan_code_line(&line[end + 2..]),
+            None => (false, LineState::Block),
+        },
+        LineState::RawString { hashes } => match raw_string_close(line.as_bytes(), 0, hashes) {
+            Some(end) => scan_code_line(&line[end..]),
+            None => (contains_code(line), LineState::RawString { hashes }),
+        },
+        LineState::Code => scan_code_line(line),
     }
 }
 
-fn scan_visible_line(line: &str) -> (bool, bool) {
-    let line_comment = line.find("//");
-    let block_comment = line.find("/*");
-    if line_comment
-        .is_some_and(|line_pos| block_comment.is_none_or(|block_pos| line_pos < block_pos))
-    {
-        let visible = &line[..line_comment.unwrap()];
-        return (contains_code(visible), false);
-    }
-    let Some(start) = block_comment else {
-        return (contains_code(line), false);
-    };
-    let before_has_code = contains_code(&line[..start]);
-    let after_start = start + 2;
-    match line[after_start..].find("*/") {
-        Some(relative_end) => {
-            let (after_has_code, in_block) =
-                scan_visible_line(&line[after_start + relative_end + 2..]);
-            (before_has_code || after_has_code, in_block)
+/// Scans one line in `Code` state. String content counts as code; comment
+/// text does not. Comment markers inside string literals are skipped with
+/// the literal, so they never open comment state.
+fn scan_code_line(line: &str) -> (bool, LineState) {
+    let bytes = line.as_bytes();
+    let mut has_code = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        match code_token(bytes, index) {
+            CodeToken::LineComment => return (has_code, LineState::Code),
+            CodeToken::BlockComment => {
+                let (code_after, after) = line_has_code(&line[index + 2..], LineState::Block);
+                return (has_code || code_after, after);
+            }
+            CodeToken::QuotedString { end } | CodeToken::RawString { end } => {
+                has_code = true;
+                index = end;
+            }
+            CodeToken::CharOrLifetime { end } => index = end,
+            CodeToken::RawStringContinues { hashes } => {
+                return (true, LineState::RawString { hashes });
+            }
+            CodeToken::Plain => {
+                has_code |= counts_as_code(bytes[index]);
+                index += 1;
+            }
         }
-        None => (before_has_code, true),
     }
+    (has_code, LineState::Code)
+}
+
+/// One scan step in `Code` state, at the byte at `index`.
+enum CodeToken {
+    LineComment,
+    BlockComment,
+    /// A quoted string that ends on this line; `end` is the index after it.
+    QuotedString {
+        end: usize,
+    },
+    /// A character literal, lifetime, or loop label; `end` is after it.
+    CharOrLifetime {
+        end: usize,
+    },
+    /// A raw string that closes on this line; `end` is the index after it.
+    RawString {
+        end: usize,
+    },
+    /// A raw string that continues on the next line.
+    RawStringContinues {
+        hashes: usize,
+    },
+    /// Any other byte.
+    Plain,
+}
+
+fn code_token(bytes: &[u8], index: usize) -> CodeToken {
+    match bytes[index] {
+        b'/' if bytes.get(index + 1) == Some(&b'/') => CodeToken::LineComment,
+        b'/' if bytes.get(index + 1) == Some(&b'*') => CodeToken::BlockComment,
+        b'"' => CodeToken::QuotedString {
+            end: skip_quoted(bytes, index + 1, b'"'),
+        },
+        b'\'' => CodeToken::CharOrLifetime {
+            end: char_literal_end(str_from(bytes, index), index)
+                .or_else(|| lifetime_end(str_from(bytes, index), index))
+                .unwrap_or(index + 1),
+        },
+        b'r' | b'b' => string_prefix_token(bytes, index),
+        _ => CodeToken::Plain,
+    }
+}
+
+/// Classifies a `r`, `b`, or `br` token: raw string, byte string, or plain.
+fn string_prefix_token(bytes: &[u8], index: usize) -> CodeToken {
+    match raw_string_start(bytes, index) {
+        Some((quote, hashes)) => match raw_string_close(bytes, quote + 1, hashes) {
+            Some(end) => CodeToken::RawString { end },
+            None => CodeToken::RawStringContinues { hashes },
+        },
+        None if bytes[index] == b'b' && bytes.get(index + 1) == Some(&b'"') => {
+            CodeToken::QuotedString {
+                end: skip_quoted(bytes, index + 2, b'"'),
+            }
+        }
+        None => CodeToken::Plain,
+    }
+}
+
+/// The source text from `index` to the end of its line, for the
+/// `char_literal_end` / `lifetime_end` helpers that expect `str` input.
+fn str_from(bytes: &[u8], index: usize) -> &str {
+    std::str::from_utf8(&bytes[index..]).unwrap_or("")
+}
+
+fn counts_as_code(byte: u8) -> bool {
+    !matches!(byte, b' ' | b'\t' | b'\r')
+}
+
+/// If the bytes at `index` start a raw string (`r"…"`, `r#"…"#`, `br"…"`,
+/// `br#"…"#`), returns the index of its opening quote and the `#` count.
+fn raw_string_start(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
+    let after_prefix = if bytes[index] == b'b' {
+        if bytes.get(index + 1) != Some(&b'r') {
+            return None;
+        }
+        index + 2
+    } else {
+        index + 1
+    };
+    let mut hashes = 0;
+    while bytes.get(after_prefix + hashes) == Some(&b'#') {
+        hashes += 1;
+    }
+    if bytes.get(after_prefix + hashes) != Some(&b'"') {
+        return None;
+    }
+    Some((after_prefix + hashes, hashes))
+}
+
+/// Returns the index just after a raw string close (`"` plus `hashes`
+/// hashes) found at or after `start`, if the literal ends on this line.
+fn raw_string_close(bytes: &[u8], start: usize, hashes: usize) -> Option<usize> {
+    let mut cursor = start;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'"'
+            && (0..hashes).all(|offset| bytes.get(cursor + 1 + offset) == Some(&b'#'))
+        {
+            return Some(cursor + 1 + hashes);
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn contains_code(text: &str) -> bool {
-    text.bytes()
-        .any(|byte| !matches!(byte, b' ' | b'\t' | b'\r'))
+    text.bytes().any(counts_as_code)
 }
 
 #[cfg(test)]
