@@ -338,7 +338,9 @@ fn valid_rule_name(rule: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric())
 }
 
-fn skip_quoted(bytes: &[u8], mut index: usize, quote: u8) -> usize {
+/// Skips a quoted literal, honouring `\` escapes. Returns the index just
+/// after the closing quote, or `bytes.len()` when the quote never closes.
+pub(crate) fn skip_quoted(bytes: &[u8], mut index: usize, quote: u8) -> usize {
     while index < bytes.len() {
         match bytes[index] {
             b'\\' => index = index.saturating_add(2),
@@ -349,7 +351,8 @@ fn skip_quoted(bytes: &[u8], mut index: usize, quote: u8) -> usize {
     index
 }
 
-fn char_literal_end(source: &str, index: usize) -> Option<usize> {
+/// Returns the index just after a character literal starting at `index`.
+pub(crate) fn char_literal_end(source: &str, index: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     if bytes.get(index) != Some(&b'\'') {
         return None;
@@ -429,7 +432,8 @@ fn unicode_escape_end(bytes: &[u8], index: usize) -> Option<usize> {
     }
 }
 
-fn lifetime_end(source: &str, index: usize) -> Option<usize> {
+/// Returns the index just after a lifetime or loop label starting at `index`.
+pub(crate) fn lifetime_end(source: &str, index: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     if bytes.get(index) != Some(&b'\'') {
         return None;

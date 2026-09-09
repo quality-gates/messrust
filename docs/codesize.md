@@ -63,7 +63,9 @@ Useful first moves:
 
 `ExcessiveMethodLength` counts the full source span of a free function or
 method. Blank and comment-only lines count by default; set
-`ignore-whitespace=true` in a custom ruleset to skip them.
+`ignore-whitespace=true` in a custom ruleset to skip them. Comment detection
+skips string literals, so a `/*` or `//` inside a quoted string does not start
+comment state; string content still counts as code.
 
 `ExcessiveClassLength` applies to `struct`, `union`, `enum`, and `trait`. It
 adds the type span and the spans of methods attached to that type. A method
