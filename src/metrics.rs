@@ -106,31 +106,76 @@ fn npath_stmts(stmts: &[Stmt]) -> usize {
 
 fn npath_stmt(stmt: &Stmt) -> usize {
     match stmt {
-        Stmt::Expr(expr, _) => npath_expr_stmt(expr),
+        Stmt::Expr(expr, _) => npath_expr(expr),
         Stmt::Macro(m) => {
             // Treat macro invocation statements as opaque linear code.
             let _ = m;
             1
         }
-        Stmt::Local(_) | Stmt::Item(_) => 1,
+        Stmt::Local(local) => npath_local(local),
+        Stmt::Item(_) => 1,
     }
 }
 
-fn npath_expr_stmt(expr: &Expr) -> usize {
+fn npath_local(local: &syn::Local) -> usize {
+    let Some(init) = &local.init else {
+        return 1;
+    };
+    let initializer = npath_expr(&init.expr);
+    match &init.diverge {
+        Some((_, diverge)) => initializer.saturating_add(npath_expr(diverge)),
+        None => initializer,
+    }
+}
+
+fn npath_expr(expr: &Expr) -> usize {
     npath_control_flow(expr)
         .or_else(|| npath_block_expression(expr))
         .or_else(|| npath_return_expression(expr))
-        .unwrap_or(1)
+        .unwrap_or_else(|| npath_nested_expressions(expr))
+}
+
+fn npath_nested_expressions(expr: &Expr) -> usize {
+    let mut visitor = NpathVisitor { paths: 1 };
+    visitor.visit_expr(expr);
+    visitor.paths
+}
+
+struct NpathVisitor {
+    paths: usize,
+}
+
+impl<'ast> Visit<'ast> for NpathVisitor {
+    fn visit_expr(&mut self, node: &'ast Expr) {
+        if let Some(paths) = npath_control_flow(node)
+            .or_else(|| npath_block_expression(node))
+            .or_else(|| npath_return_expression(node))
+        {
+            self.paths = self.paths.saturating_mul(paths);
+        } else {
+            syn::visit::visit_expr(self, node);
+        }
+    }
+}
+
+fn npath_expression_complexity(expr: &Expr) -> usize {
+    expression_complexity(expr).max(npath_expr(expr).saturating_sub(1))
 }
 
 fn npath_control_flow(expr: &Expr) -> Option<usize> {
     match expr {
         Expr::If(node) => Some(npath_if(node)),
         Expr::Match(node) => Some(npath_match(node)),
-        Expr::ForLoop(node) => {
-            Some(expression_complexity(&node.expr).saturating_add(1).saturating_add(npath_block(&node.body)))
-        }
-        Expr::While(node) => Some(expression_complexity(&node.cond).saturating_add(1).saturating_add(npath_block(&node.body))),
+        Expr::ForLoop(node) => Some(
+            npath_expression_complexity(&node.expr)
+                .saturating_add(1)
+                .saturating_add(npath_block(&node.body)),
+        ),
+        Expr::While(node) => Some(
+            npath_expression_complexity(&node.cond)
+                .saturating_add(1)
+                .saturating_add(npath_block(&node.body)),
+        ),
         Expr::Loop(node) => Some(1usize.saturating_add(npath_block(&node.body))),
         _ => None,
     }
@@ -150,12 +195,16 @@ fn npath_return_expression(expr: &Expr) -> Option<usize> {
     let Expr::Return(node) = expr else {
         return None;
     };
-    let complexity = node.expr.as_deref().map(expression_complexity).unwrap_or(0);
+    let complexity = node
+        .expr
+        .as_deref()
+        .map(npath_expression_complexity)
+        .unwrap_or(0);
     Some(complexity.max(1))
 }
 
 fn npath_if(node: &ExprIf) -> usize {
-    let expr = expression_complexity(&node.cond);
+    let expr = npath_expression_complexity(&node.cond);
     let body = npath_block(&node.then_branch);
     // Rust grammar allows only a block or a nested `if` after `else`; no
     // other expression form parses, so there is no third case here.
@@ -171,12 +220,12 @@ fn npath_if(node: &ExprIf) -> usize {
 }
 
 fn npath_match(node: &syn::ExprMatch) -> usize {
-    let mut npath = expression_complexity(&node.expr);
+    let mut npath = npath_expression_complexity(&node.expr);
     for arm in &node.arms {
         if let Some((_, guard)) = &arm.guard {
-            npath = npath.saturating_add(expression_complexity(guard));
+            npath = npath.saturating_add(npath_expression_complexity(guard));
         }
-        npath = npath.saturating_add(npath_expr_stmt(&arm.body));
+        npath = npath.saturating_add(npath_expr(&arm.body));
     }
     if npath == 0 {
         1
