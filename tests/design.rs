@@ -788,6 +788,25 @@ fn global_variable_reports_mutated_static_mut() {
 }
 
 #[test]
+fn global_variable_reports_qualified_mutated_static_mut() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "qualified.rs",
+        "mod state {\n    pub static mut COUNT: usize = 0;\n}\n\nfn bump() {\n    unsafe {\n        state::COUNT += 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNT.",
+    );
+}
+
+#[test]
 fn global_variable_allows_immutable_static_and_unmutated_static_mut() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
