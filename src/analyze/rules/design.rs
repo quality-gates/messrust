@@ -160,7 +160,7 @@ pub(crate) fn apply_global_variable(
 ) {
     let report_immutable = property_bool(rule, "report-immutable", false);
     for g in &model.static_muts {
-        if model.mutated_statics.contains(&g.name) || report_immutable {
+        if model.mutated_statics.contains(&g.key) || report_immutable {
             out.push(name_violation(
                 rule,
                 file,
@@ -194,5 +194,4 @@ pub(crate) fn apply_lack_of_cohesion(
         }
     }
 }
-
 

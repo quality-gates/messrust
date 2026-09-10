@@ -11,10 +11,10 @@ use syn::{
 
 use crate::analyze::helpers::is_public;
 
-use super::use_def::{is_binding_name, path_last_ident};
+use super::use_def::is_binding_name;
 use super::{
     bool_params, count_params, field_stats, full_type_path_from_type, returns_bool,
-    type_name_from_path, DuplicateKey, FieldInfo, FnModel, MethodRef, NamedBinding, NamedSite,
+    type_name_from_path, DuplicateKey, FieldInfo, FnModel, MethodRef, NamedBinding, StaticMutSite,
     TypeModel,
 };
 
@@ -550,23 +550,37 @@ pub(crate) fn is_builtin_type(name: &str) -> bool {
 
 #[derive(Default)]
 pub(crate) struct StaticMutCollector {
-    pub(crate) static_muts: Vec<NamedSite>,
+    pub(crate) static_muts: Vec<StaticMutSite>,
     pub(crate) mutated: HashSet<String>,
+    scope: Vec<String>,
 }
 
 
 impl<'ast> Visit<'ast> for StaticMutCollector {
     fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
         if !matches!(node.mutability, syn::StaticMutability::None) {
-            self.static_muts.push(NamedSite {
-                name: node.ident.to_string(),
+            let name = node.ident.to_string();
+            self.static_muts.push(StaticMutSite {
+                key: qualified_name(&self.scope, &name),
+                name,
                 begin_line: node.ident.span().start().line,
             });
         }
     }
 
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let Some((_, items)) = &node.content else {
+            return;
+        };
+        self.scope.push(node.ident.to_string());
+        for item in items {
+            self.visit_item(item);
+        }
+        self.scope.pop();
+    }
+
     fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
-        collect_mutated_static_place(&node.left, &mut self.mutated);
+        collect_mutated_static_place(&node.left, &self.scope, &mut self.mutated);
         syn::visit::visit_expr_assign(self, node);
     }
 
@@ -584,27 +598,65 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
                 | syn::BinOp::ShlAssign(_)
                 | syn::BinOp::ShrAssign(_)
         ) {
-            collect_mutated_static_place(&node.left, &mut self.mutated);
+            collect_mutated_static_place(&node.left, &self.scope, &mut self.mutated);
         }
         syn::visit::visit_expr_binary(self, node);
     }
 }
 
 
-fn collect_mutated_static_place(expr: &syn::Expr, mutated: &mut HashSet<String>) {
+fn qualified_name(scope: &[String], name: &str) -> String {
+    if scope.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}::{name}", scope.join("::"))
+    }
+}
+
+
+fn static_path_key(path: &syn::Path, scope: &[String]) -> Option<String> {
+    let mut components = if path.leading_colon.is_some() {
+        Vec::new()
+    } else {
+        scope.to_vec()
+    };
+    let mut has_name = false;
+    for segment in &path.segments {
+        let name = segment.ident.to_string();
+        match name.as_str() {
+            "crate" => components.clear(),
+            "self" => {}
+            "super" => {
+                components.pop();
+            }
+            _ => {
+                components.push(name);
+                has_name = true;
+            }
+        }
+    }
+    has_name.then(|| components.join("::"))
+}
+
+
+fn collect_mutated_static_place(
+    expr: &syn::Expr,
+    scope: &[String],
+    mutated: &mut HashSet<String>,
+) {
     match expr {
         syn::Expr::Path(p) => {
             if p.qself.is_none() {
-                if let Some(ident) = path_last_ident(p) {
-                    mutated.insert(ident);
+                if let Some(key) = static_path_key(&p.path, scope) {
+                    mutated.insert(key);
                 }
             }
         }
-        syn::Expr::Field(f) => collect_mutated_static_place(&f.base, mutated),
-        syn::Expr::Index(i) => collect_mutated_static_place(&i.expr, mutated),
-        syn::Expr::Paren(p) => collect_mutated_static_place(&p.expr, mutated),
+        syn::Expr::Field(f) => collect_mutated_static_place(&f.base, scope, mutated),
+        syn::Expr::Index(i) => collect_mutated_static_place(&i.expr, scope, mutated),
+        syn::Expr::Paren(p) => collect_mutated_static_place(&p.expr, scope, mutated),
         syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => {
-            collect_mutated_static_place(&u.expr, mutated)
+            collect_mutated_static_place(&u.expr, scope, mutated)
         }
         _ => {}
     }

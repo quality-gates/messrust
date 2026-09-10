@@ -248,7 +248,7 @@ pub(crate) struct FileModel<'a> {
     pub(crate) constants: Vec<NamedBinding>,
     pub(crate) usage: UseDefModel,
     pub(crate) duplicate_struct_keys: Vec<DuplicateKey>,
-    pub(crate) static_muts: Vec<NamedSite>,
+    pub(crate) static_muts: Vec<StaticMutSite>,
     pub(crate) mutated_statics: HashSet<String>,
 }
 
@@ -269,6 +269,14 @@ pub(crate) struct UseDefModel {
 
 
 pub(crate) struct NamedSite {
+    pub(crate) name: String,
+    pub(crate) begin_line: usize,
+}
+
+
+#[derive(Clone, Debug)]
+pub(crate) struct StaticMutSite {
+    pub(crate) key: String,
     pub(crate) name: String,
     pub(crate) begin_line: usize,
 }
