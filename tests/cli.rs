@@ -68,14 +68,14 @@ fn deeply_nested_if_blocks(depth: usize) -> String {
 }
 
 #[test]
-fn binary_smoke_runs_the_real_entrypoint_and_exits_zero() {
-    // Mutation-gate policy for src/main.rs: the binary entrypoint must stay
-    // covered by tests that run the real executable, so `exit(code)` mutants
-    // are scored, not exempted.
-    let output = Command::new(env!("CARGO_BIN_EXE_messrust"))
-        .arg("--version")
-        .output()
-        .unwrap();
+fn binary_smoke_runs_the_real_entrypoint_across_exit_codes() {
+    // src/main.rs exits with the code that messrust::run returns. These
+    // tests run the real executable, so the mutation gate scores src/main.rs
+    // mutants. No exemption policy applies.
+    let binary = env!("CARGO_BIN_EXE_messrust");
+
+    // Exit 0: success path.
+    let output = Command::new(binary).arg("--version").output().unwrap();
     assert!(
         output.status.success(),
         "stderr={:?}",
@@ -83,6 +83,37 @@ fn binary_smoke_runs_the_real_entrypoint_and_exits_zero() {
     );
     assert!(
         String::from_utf8_lossy(&output.stdout).starts_with("messrust "),
+        "stdout={:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // Exit 1: error path.
+    let output = Command::new(binary)
+        .args(["--not-a-real-flag"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_ERROR),
+        "stderr={:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Exit 2: violations path.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let output = Command::new(binary)
+        .args([path.to_str().unwrap(), "text", "codesize"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_VIOLATION),
+        "stderr={:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("ExcessiveParameterList"),
         "stdout={:?}",
         String::from_utf8_lossy(&output.stdout)
     );
