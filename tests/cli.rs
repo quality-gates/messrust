@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use messrust::{run, EXIT_ERROR, EXIT_SUCCESS, EXIT_VIOLATION};
 use tempfile::TempDir;
@@ -64,6 +65,27 @@ fn deeply_nested_if_blocks(depth: usize) -> String {
     source.extend(std::iter::repeat_n(" }", depth));
     source.push_str(" }\n");
     source
+}
+
+#[test]
+fn binary_smoke_runs_the_real_entrypoint_and_exits_zero() {
+    // Mutation-gate policy for src/main.rs: the binary entrypoint must stay
+    // covered by tests that run the real executable, so `exit(code)` mutants
+    // are scored, not exempted.
+    let output = Command::new(env!("CARGO_BIN_EXE_messrust"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr={:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("messrust "),
+        "stdout={:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[test]
