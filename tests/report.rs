@@ -290,6 +290,26 @@ fn github_format_prints_exact_warning_annotation() {
 }
 
 #[test]
+fn github_format_escapes_annotation_file_property() {
+    let (_td, root) = tmp();
+    let path = write_file(
+        &root,
+        "fixture,comma.rs",
+        &fn_with_n_params("entry_point", 11),
+    );
+    let file = path.to_str().unwrap();
+    let (code, out, err) = run_cli(&[root.to_str().unwrap(), "github", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    let escaped_file = file.replace(',', "%2C");
+    let expected = format!(
+        "::warning file={escaped_file},line=1,col=1::{} (ExcessiveParameterList)\n",
+        param_list_message("entry_point", 11)
+    );
+    assert_eq!(out, expected);
+}
+
+#[test]
 fn github_format_empty_findings_prints_nothing() {
     let (_td, root) = tmp();
     let path = write_file(&root, "clean.rs", &fn_with_n_params("ok", 0));
