@@ -22,6 +22,7 @@ fn run_cli(args: &[&str]) -> (i32, String, String) {
     )
 }
 
+
 fn write_file(dir: &Path, rel: &str, contents: &str) -> PathBuf {
     let path = dir.join(rel);
     if let Some(parent) = path.parent() {
@@ -484,6 +485,37 @@ fn npath_complexity_while_loop_is_condition_plus_one_plus_body() {
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_local_initializer_counts_nested_if_expression() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "local_if.rs",
+        "fn nested(flag: bool) {\n    let value = if flag { 1 } else { 2 };\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("NPath complexity of 2"), "stdout={out:?}");
+}
+
+#[test]
+fn npath_complexity_call_argument_counts_nested_if_expression() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "call_if.rs",
+        "fn consume(_value: i32) {}\nfn call_argument(flag: bool) {\n    consume(if flag { 1 } else { 2 });\n}\n",
+    );
+    let xml = np_xml(dir.path(), "np.xml", 2);
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        out.contains("The function call_argument() has an NPath complexity of 2"),
+        "stdout={out:?}"
+    );
 }
 
 #[test]
@@ -1621,5 +1653,3 @@ mod b {
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
     assert!(!out.contains("TooManyPublicMethods"), "stdout={out:?}");
 }
-
-
