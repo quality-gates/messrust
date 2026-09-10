@@ -945,6 +945,18 @@ fn lack_of_cohesion_allows_accessor_only_data_carrier() {
 }
 
 #[test]
+fn lack_of_cohesion_allows_explicit_return_accessors() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "return_accessors.rs",
+        "struct Pair {\n    left: i32,\n    right: i32,\n}\nimpl Pair {\n    fn get_left(&self) -> i32 { return self.left; }\n    fn get_right(&self) -> i32 { return self.right; }\n    fn set_left(&mut self, v: i32) { return self.left = v; }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
 fn lack_of_cohesion_links_through_getter_calls() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

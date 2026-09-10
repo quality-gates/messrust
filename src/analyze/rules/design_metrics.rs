@@ -441,6 +441,16 @@ fn accessor_field(m: &MethodRef<'_>) -> Option<String> {
     match &body.stmts[0] {
         syn::Stmt::Expr(syn::Expr::Field(field), _) => receiver_field(field),
         syn::Stmt::Expr(syn::Expr::Assign(assign), _) => assigned_receiver_field(assign),
+        syn::Stmt::Expr(syn::Expr::Return(returns), _) => returned_receiver_field(returns),
+        _ => None,
+    }
+}
+
+
+fn returned_receiver_field(returns: &syn::ExprReturn) -> Option<String> {
+    match returns.expr.as_deref() {
+        Some(syn::Expr::Field(field)) => receiver_field(field),
+        Some(syn::Expr::Assign(assign)) => assigned_receiver_field(assign),
         _ => None,
     }
 }
