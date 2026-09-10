@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use messrust::{run, EXIT_ERROR, EXIT_SUCCESS, EXIT_VIOLATION};
 use tempfile::TempDir;
@@ -64,6 +65,58 @@ fn deeply_nested_if_blocks(depth: usize) -> String {
     source.extend(std::iter::repeat_n(" }", depth));
     source.push_str(" }\n");
     source
+}
+
+#[test]
+fn binary_smoke_runs_the_real_entrypoint_across_exit_codes() {
+    // src/main.rs exits with the code that messrust::run returns. These
+    // tests run the real executable, so the mutation gate scores src/main.rs
+    // mutants. No exemption policy applies.
+    let binary = env!("CARGO_BIN_EXE_messrust");
+
+    // Exit 0: success path.
+    let output = Command::new(binary).arg("--version").output().unwrap();
+    assert!(
+        output.status.success(),
+        "stderr={:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("messrust "),
+        "stdout={:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // Exit 1: error path.
+    let output = Command::new(binary)
+        .args(["--not-a-real-flag"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_ERROR),
+        "stderr={:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Exit 2: violations path.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let output = Command::new(binary)
+        .args([path.to_str().unwrap(), "text", "codesize"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_VIOLATION),
+        "stderr={:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("ExcessiveParameterList"),
+        "stdout={:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[test]
