@@ -11,7 +11,7 @@ use syn::{
 
 use crate::analyze::helpers::is_public;
 
-use super::use_def::{is_binding_name, path_single_ident};
+use super::use_def::{is_binding_name, path_last_ident};
 use super::{
     bool_params, count_params, field_stats, full_type_path_from_type, returns_bool,
     type_name_from_path, DuplicateKey, FieldInfo, FnModel, MethodRef, NamedBinding, NamedSite,
@@ -594,8 +594,10 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
 fn collect_mutated_static_place(expr: &syn::Expr, mutated: &mut HashSet<String>) {
     match expr {
         syn::Expr::Path(p) => {
-            if let Some(ident) = path_single_ident(p) {
-                mutated.insert(ident);
+            if p.qself.is_none() {
+                if let Some(ident) = path_last_ident(p) {
+                    mutated.insert(ident);
+                }
             }
         }
         syn::Expr::Field(f) => collect_mutated_static_place(&f.base, mutated),
@@ -607,4 +609,3 @@ fn collect_mutated_static_place(expr: &syn::Expr, mutated: &mut HashSet<String>)
         _ => {}
     }
 }
-
