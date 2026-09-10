@@ -422,22 +422,81 @@ fn write_html(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
 
 // ----- GitHub Actions -----------------------------------------------------
 
+fn github_escape_property(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+        .replace(':', "%3A")
+        .replace(',', "%2C")
+}
+
+fn github_escape_data(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
 fn write_github(report: &Report, out: &mut dyn Write) -> std::io::Result<()> {
     for v in &report.violations {
         writeln!(
             out,
             "::warning file={},line={},col=1::{} ({}{})",
-            v.file,
+            github_escape_property(&v.file),
             v.begin_line,
-            v.description,
-            v.rule_name,
+            github_escape_data(&v.description),
+            github_escape_data(&v.rule_name),
             if v.suppressed { ", suppressed" } else { "" }
         )?;
     }
     for e in &report.errors {
-        writeln!(out, "::error file={}::{}", e.file, e.message)?;
+        writeln!(
+            out,
+            "::error file={}::{}",
+            github_escape_property(&e.file),
+            github_escape_data(&e.message)
+        )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod github_tests {
+    use super::*;
+
+    #[test]
+    fn escapes_annotation_properties_and_data() {
+        let report = Report {
+            violations: vec![Violation {
+                file: "fixture,colon:%\r\n.rs".to_string(),
+                begin_line: 1,
+                end_line: 1,
+                rule_name: "Rule%".to_string(),
+                ruleset_name: String::new(),
+                description: "message%\r\n".to_string(),
+                priority: 1,
+                package: String::new(),
+                function: String::new(),
+                class: String::new(),
+                method: String::new(),
+                external_info_url: String::new(),
+                suppressed: false,
+            }],
+            errors: vec![ProcessingError {
+                file: "error,file:%.rs".to_string(),
+                message: "error%\r\n".to_string(),
+            }],
+        };
+        let mut out = Vec::new();
+
+        write_github(&report, &mut out).unwrap();
+
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "::warning file=fixture%2Ccolon%3A%25%0D%0A.rs,line=1,col=1::message%25%0D%0A (Rule%25)\n::error file=error%2Cfile%3A%25.rs::error%25%0D%0A\n"
+        );
+    }
 }
 
 // ----- GitLab Code Quality ------------------------------------------------
