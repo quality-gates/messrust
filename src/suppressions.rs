@@ -338,17 +338,22 @@ fn valid_rule_name(rule: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric())
 }
 
-/// Skips a quoted literal, honouring `\` escapes. Returns the index just
-/// after the closing quote, or `bytes.len()` when the quote never closes.
-pub(crate) fn skip_quoted(bytes: &[u8], mut index: usize, quote: u8) -> usize {
+/// Finds the end of a quoted literal, honouring escapes.
+pub(crate) fn quoted_end(bytes: &[u8], mut index: usize, quote: u8) -> Option<usize> {
     while index < bytes.len() {
         match bytes[index] {
             b'\\' => index = index.saturating_add(2),
-            c if c == quote => return index + 1,
+            c if c == quote => return Some(index + 1),
             _ => index += 1,
         }
     }
-    index
+    None
+}
+
+/// Skips a quoted literal, honouring escapes. Returns the index just after
+/// the closing quote, or `bytes.len()` when the quote never closes.
+pub(crate) fn skip_quoted(bytes: &[u8], index: usize, quote: u8) -> usize {
+    quoted_end(bytes, index, quote).unwrap_or(bytes.len())
 }
 
 /// Returns the index just after a character literal starting at `index`.

@@ -758,6 +758,39 @@ fn effective_lines_of_code_ignores_comment_markers_inside_strings() {
 }
 
 #[test]
+fn effective_lines_of_code_ignores_comment_markers_inside_multiline_quoted_strings() {
+    let dir = TempDir::new().unwrap();
+    let xml = eml_ignore_ws_xml(dir.path(), "multiline.xml", 5);
+    for (literal, name) in [
+        (
+            "\"first line\n/* marker inside string\nthird line\"",
+            "string",
+        ),
+        (
+            "b\"first line\n/* marker inside byte string\nthird line\"",
+            "byte",
+        ),
+    ] {
+        let path = write_file(
+            dir.path(),
+            &format!("multiline_{name}.rs"),
+            &format!(
+                "fn multiline_quote() {{\n    let text = {literal};\n    let _a = 1;\n    let _b = 2;\n    let _c = 3;\n    let _d = 4;\n}}\n"
+            ),
+        );
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+        assert_eq!(code, EXIT_VIOLATION, "{name}: stderr={err:?}");
+        assert_finding(
+            &out,
+            &path,
+            1,
+            "ExcessiveMethodLength",
+            "The function multiline_quote() has 9 lines of code. Current threshold is set to 5. Avoid really long methods.",
+        );
+    }
+}
+
+#[test]
 fn effective_lines_of_code_ignores_comment_markers_inside_raw_strings() {
     let dir = TempDir::new().unwrap();
     let body: String = (0..28)

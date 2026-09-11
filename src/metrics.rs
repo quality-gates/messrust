@@ -14,7 +14,7 @@
 use syn::visit::Visit;
 use syn::{BinOp, Block, Expr, ExprIf, Pat, Stmt};
 
-use crate::suppressions::{char_literal_end, lifetime_end, skip_quoted};
+use crate::suppressions::{char_literal_end, lifetime_end, quoted_end};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -286,6 +286,13 @@ pub(crate) fn effective_line_count(prefix: &[usize], start_line: usize, end_line
     prefix[end].saturating_sub(prefix[start_line - 1])
 }
 
+/// Kind of string literal carried from one raw line to the next.
+#[derive(Clone, Copy)]
+enum StringKind {
+    Quoted,
+    Raw { hashes: usize },
+}
+
 /// Scan state carried from one raw line to the next. String literals are
 /// code, not comments: a `//` or `/*` inside a quoted literal must not open
 /// comment state, and comment text is not string content, so `"` inside a
@@ -293,12 +300,12 @@ pub(crate) fn effective_line_count(prefix: &[usize], start_line: usize, end_line
 /// in `suppressions.rs` and rustc's lexer.
 #[derive(Clone, Copy)]
 enum LineState {
-    /// Not inside a comment or a raw string carried over from earlier lines.
+    /// Not inside a comment or a string carried over from earlier lines.
     Code,
     /// Inside a block comment that has not closed yet.
     Block,
-    /// Inside a raw string that continues on the next line.
-    RawString { hashes: usize },
+    /// Inside a string that has not closed yet.
+    String { kind: StringKind },
 }
 
 fn line_has_code(line: &str, state: LineState) -> (bool, LineState) {
@@ -307,11 +314,21 @@ fn line_has_code(line: &str, state: LineState) -> (bool, LineState) {
             Some(end) => scan_code_line(&line[end + 2..]),
             None => (false, LineState::Block),
         },
-        LineState::RawString { hashes } => match raw_string_close(line.as_bytes(), 0, hashes) {
-            Some(end) => scan_code_line(&line[end..]),
-            None => (contains_code(line), LineState::RawString { hashes }),
-        },
+        LineState::String { kind } => line_has_string_code(line, kind),
         LineState::Code => scan_code_line(line),
+    }
+}
+
+fn line_has_string_code(line: &str, kind: StringKind) -> (bool, LineState) {
+    match kind {
+        StringKind::Quoted => match quoted_end(line.as_bytes(), 0, b'"') {
+            Some(end) => scan_code_line(&line[end..]),
+            None => (contains_code(line), LineState::String { kind }),
+        },
+        StringKind::Raw { hashes } => match raw_string_close(line.as_bytes(), 0, hashes) {
+            Some(end) => scan_code_line(&line[end..]),
+            None => (contains_code(line), LineState::String { kind }),
+        },
     }
 }
 
@@ -333,10 +350,10 @@ fn scan_code_line(line: &str) -> (bool, LineState) {
                 has_code = true;
                 index = end;
             }
-            CodeToken::CharOrLifetime { end } => index = end,
-            CodeToken::RawStringContinues { hashes } => {
-                return (true, LineState::RawString { hashes });
+            CodeToken::StringContinues { kind } => {
+                return (true, LineState::String { kind });
             }
+            CodeToken::CharOrLifetime { end } => index = end,
             CodeToken::Plain => {
                 has_code |= counts_as_code(bytes[index]);
                 index += 1;
@@ -354,6 +371,8 @@ enum CodeToken {
     QuotedString {
         end: usize,
     },
+    /// A string that continues on the next line.
+    StringContinues { kind: StringKind },
     /// A character literal, lifetime, or loop label; `end` is after it.
     CharOrLifetime {
         end: usize,
@@ -361,10 +380,6 @@ enum CodeToken {
     /// A raw string that closes on this line; `end` is the index after it.
     RawString {
         end: usize,
-    },
-    /// A raw string that continues on the next line.
-    RawStringContinues {
-        hashes: usize,
     },
     /// Any other byte.
     Plain,
@@ -374,9 +389,7 @@ fn code_token(bytes: &[u8], index: usize) -> CodeToken {
     match bytes[index] {
         b'/' if bytes.get(index + 1) == Some(&b'/') => CodeToken::LineComment,
         b'/' if bytes.get(index + 1) == Some(&b'*') => CodeToken::BlockComment,
-        b'"' => CodeToken::QuotedString {
-            end: skip_quoted(bytes, index + 1, b'"'),
-        },
+        b'"' => quoted_string_token(bytes, index + 1),
         b'\'' => CodeToken::CharOrLifetime {
             end: char_literal_end(str_from(bytes, index), index)
                 .or_else(|| lifetime_end(str_from(bytes, index), index))
@@ -392,14 +405,23 @@ fn string_prefix_token(bytes: &[u8], index: usize) -> CodeToken {
     match raw_string_start(bytes, index) {
         Some((quote, hashes)) => match raw_string_close(bytes, quote + 1, hashes) {
             Some(end) => CodeToken::RawString { end },
-            None => CodeToken::RawStringContinues { hashes },
+            None => CodeToken::StringContinues {
+                kind: StringKind::Raw { hashes },
+            },
         },
         None if bytes[index] == b'b' && bytes.get(index + 1) == Some(&b'"') => {
-            CodeToken::QuotedString {
-                end: skip_quoted(bytes, index + 2, b'"'),
-            }
+            quoted_string_token(bytes, index + 2)
         }
         None => CodeToken::Plain,
+    }
+}
+
+fn quoted_string_token(bytes: &[u8], start: usize) -> CodeToken {
+    match quoted_end(bytes, start, b'"') {
+        Some(end) => CodeToken::QuotedString { end },
+        None => CodeToken::StringContinues {
+            kind: StringKind::Quoted,
+        },
     }
 }
 
