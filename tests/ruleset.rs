@@ -70,6 +70,7 @@ fn rule_without_class_or_ref_is_skipped_silently() {
         r#"<?xml version="1.0" encoding="UTF-8" ?>
 <ruleset name="Noop">
   <rule name="NeitherClassNorRef"/>
+  <rule ref="codesize/ExcessiveParameterList"/>
 </ruleset>
 "#,
     )
@@ -91,13 +92,14 @@ fn named_ref_to_missing_rule_in_source_ruleset_yields_no_rule_and_no_error() {
     // resolved source ruleset. No rule is added, and the load itself does
     // not error.
     let dir = TempDir::new().unwrap();
-    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
     let xml = dir.path().join("missing.xml");
     fs::write(
         &xml,
         r#"<?xml version="1.0" encoding="UTF-8" ?>
 <ruleset name="Missing">
   <rule ref="codesize/NotARealRule"/>
+  <rule ref="codesize/ExcessiveParameterList"/>
 </ruleset>
 "#,
     )
@@ -110,9 +112,8 @@ fn named_ref_to_missing_rule_in_source_ruleset_yields_no_rule_and_no_error() {
 
 #[test]
 fn unresolvable_ref_warns_cannot_resolve_and_does_not_error() {
-    // read_referenced_ruleset: the ref base is neither a builtin name nor
-    // a file. The load must warn (in verbose mode) and continue rather
-    // than fail.
+    // A ruleset with only unresolvable refs resolves zero rules and must
+    // exit with EXIT_ERROR (code 1) and report an error message.
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
     let xml = dir.path().join("badref.xml");
@@ -131,10 +132,14 @@ fn unresolvable_ref_warns_cannot_resolve_and_does_not_error() {
         xml.to_str().unwrap(),
         "--verbose",
     ]);
-    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert_eq!(code, EXIT_ERROR, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert!(
         err.contains("warning: Cannot resolve ref: doesnotexist/Something"),
+        "stderr={err:?}"
+    );
+    assert!(
+        err.contains("no rules"),
         "stderr={err:?}"
     );
 }
@@ -1120,10 +1125,14 @@ fn custom_xml_ruleset_bare_unknown_rule_warns_cleanly_without_panicking() {
         xml.to_str().unwrap(),
         "--verbose",
     ]);
-    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert_eq!(code, EXIT_ERROR, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert!(
         err.contains("Cannot resolve ref: NotARealRule"),
+        "stderr={err:?}"
+    );
+    assert!(
+        err.contains("no rules were loaded from the specified rulesets"),
         "stderr={err:?}"
     );
 }
@@ -1157,5 +1166,93 @@ fn custom_xml_ruleset_resolves_bare_rules_across_all_builtin_categories() {
     assert!(out.contains("LongVariable"), "stdout={out:?}");
 }
 
+#[test]
+fn empty_ruleset_element_exits_with_error_and_prints_to_stderr() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let xml = dir.path().join("empty.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Empty">
+</ruleset>
+"#,
+    )
+    .unwrap();
 
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_ERROR, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("error: no rules were loaded from the specified rulesets"),
+        "stderr={err:?}"
+    );
+}
 
+#[test]
+fn ruleset_mixing_valid_rules_and_unresolvable_ref_executes_valid_rules_on_clean_source() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));
+    let xml = dir.path().join("mixed.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Mixed">
+  <rule ref="doesnotexist/Something"/>
+  <rule ref="codesize/ExcessiveParameterList"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+        "--verbose",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("warning: Cannot resolve ref: doesnotexist/Something"),
+        "stderr={err:?}"
+    );
+    assert!(
+        !err.contains("no rules were loaded"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn ruleset_mixing_valid_rules_and_unresolvable_ref_executes_valid_rules_on_violating_source() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(11));
+    let xml = dir.path().join("mixed.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Mixed">
+  <rule ref="doesnotexist/Something"/>
+  <rule ref="codesize/ExcessiveParameterList"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+        "--verbose",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+    assert!(
+        err.contains("warning: Cannot resolve ref: doesnotexist/Something"),
+        "stderr={err:?}"
+    );
+    assert!(
+        !err.contains("no rules were loaded"),
+        "stderr={err:?}"
+    );
+}
