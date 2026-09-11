@@ -238,7 +238,7 @@ struct OverrideCheckpoint {
     context_names: Rc<ContextNameTrie>,
     priority: Option<u8>,
     previous_properties: Option<BTreeMap<String, String>>,
-    added_properties: Vec<String>,
+    property_undo: Vec<(String, Option<String>)>,
     previous_excludes: Option<HashMap<String, usize>>,
     added_excludes: Vec<String>,
     previous_message: Option<String>,
@@ -417,12 +417,12 @@ impl ActiveOverrides {
     }
 
     fn push_named(&mut self, rule: &XmlRule) -> OverrideCheckpoint {
-        let mut added_properties = Vec::new();
+        let mut property_undo = Vec::new();
         for (name, value) in &rule.properties {
-            if !self.properties.contains_key(name) {
-                self.properties.insert(name.clone(), value.clone());
-                added_properties.push(name.clone());
-            }
+            property_undo.push((
+                name.clone(),
+                self.properties.insert(name.clone(), value.clone()),
+            ));
         }
         let previous_excludes = std::mem::take(&mut self.excludes);
         let previous_context_names = Rc::clone(&self.context_names);
@@ -438,7 +438,7 @@ impl ActiveOverrides {
             context_names: previous_context_names,
             priority: self.priority,
             previous_properties: None,
-            added_properties,
+            property_undo,
             previous_excludes: Some(previous_excludes),
             added_excludes: Vec::new(),
             previous_message: None,
@@ -463,7 +463,7 @@ impl ActiveOverrides {
             context_names: previous_context_names,
             priority: self.priority,
             previous_properties: Some(previous_properties),
-            added_properties: Vec::new(),
+            property_undo: Vec::new(),
             previous_excludes: None,
             added_excludes: rule.excludes.clone(),
             previous_message: Some(previous_message),
@@ -486,9 +486,7 @@ impl ActiveOverrides {
         if let Some(previous) = checkpoint.previous_properties {
             self.properties = previous;
         } else {
-            for name in checkpoint.added_properties {
-                self.properties.remove(&name);
-            }
+            restore_overridden_properties(&mut self.properties, checkpoint.property_undo);
         }
         if let Some(previous) = checkpoint.previous_excludes {
             self.excludes = previous;
@@ -811,6 +809,46 @@ fn boundary_summary(child: ExpansionResult, rule: &XmlRule, kind: BoundaryKind) 
     })
 }
 
+fn replace_loaded_rule(out: &mut [LoadedRule], updated: LoadedRule) {
+    if let Some(existing) = out.iter_mut().find(|rule| rule.name == updated.name) {
+        *existing = updated;
+    }
+}
+
+fn reference_forces_reexpansion(rule: &XmlRule, target_rule_name: &str) -> bool {
+    !target_rule_name.is_empty() && (!rule.properties.is_empty() || rule.priority.is_some())
+}
+
+/// Cached expansion result reusable for this reference boundary. A
+/// boundary that carries property or priority values must re-expand so
+/// the later values apply, so no cached result is reused.
+fn reusable_boundary_result(
+    loader: &mut RulesetLoader,
+    key: &ExpansionKey,
+    rule: &XmlRule,
+    named: bool,
+    force: bool,
+) -> Option<ExpansionResult> {
+    if force {
+        return None;
+    }
+    loader.cached_without_boundary(key, rule, named)
+}
+
+/// Cached expansion result for a re-entrant expansion node. A forced
+/// expansion must skip the completed/incomplete cache so the reference
+/// boundary's later values apply.
+fn cached_expansion_result(
+    loader: &mut RulesetLoader,
+    key: &ExpansionKey,
+    force: bool,
+) -> Option<ExpansionResult> {
+    if force {
+        return None;
+    }
+    loader.cached_result(key)
+}
+
 impl BlockerEvaluator<'_> {
     fn exclusion_context(&mut self, summary: &ExpansionResult) -> u64 {
         let active_id = self.overrides.context_names.id;
@@ -964,6 +1002,10 @@ struct RulesetLoader<'a> {
     opts: &'a LoadOptions,
     warn: &'a mut dyn FnMut(String),
     resolved_rule_count: usize,
+    /// Expansion key whose completed/incomplete cache entry must be
+    /// re-expanded because the enclosing reference carries property or
+    /// priority values that later references must apply.
+    force_expand: Option<ExpansionKey>,
 }
 
 fn expansion_key(source_id: &str, rule_name: &str) -> ExpansionKey {
@@ -979,6 +1021,7 @@ impl<'a> RulesetLoader<'a> {
             opts,
             warn,
             resolved_rule_count: 0,
+            force_expand: None,
         }
     }
 
@@ -1047,7 +1090,8 @@ impl<'a> RulesetLoader<'a> {
         }
 
         let key = expansion_key(source_id, rule_name);
-        if let Some(cached) = self.cached_result(&key) {
+        let force = self.force_expand.take().is_some();
+        if let Some(cached) = cached_expansion_result(self, &key, force) {
             return Ok(cached);
         }
 
@@ -1100,11 +1144,13 @@ impl<'a> RulesetLoader<'a> {
         } else {
             BoundaryKind::Full
         };
-        if let Some(blocked) = self.cached_without_boundary(&key, rule, named) {
+        let force = reference_forces_reexpansion(rule, &target.rule_name);
+        if let Some(blocked) = reusable_boundary_result(self, &key, rule, named, force) {
             return Ok(blocked);
         }
 
         let checkpoint = self.overrides.push_boundary(rule, kind);
+        self.force_expand = force.then(|| key.clone());
         let result = self.expand_source(
             out,
             &target.source_id,
@@ -1112,6 +1158,7 @@ impl<'a> RulesetLoader<'a> {
             &target.source_name,
             &target.rule_name,
         );
+        self.force_expand = None;
         self.overrides.pop(checkpoint);
         self.finish_boundary(result?, rule, named)
     }
@@ -1247,6 +1294,13 @@ impl<'a> RulesetLoader<'a> {
         use_overrides: bool,
     ) -> Option<BlockedRule> {
         if self.loaded.names.contains(&def.name) {
+            if use_overrides {
+                if let BuildRuleResult::Loaded(updated) =
+                    build_rule(set_name, def, Some(&self.overrides), self.opts, self.warn)
+                {
+                    replace_loaded_rule(out, updated);
+                }
+            }
             return None;
         }
         let overrides = use_overrides.then_some(&self.overrides);
@@ -1267,6 +1321,22 @@ impl<'a> RulesetLoader<'a> {
                 },
             }),
             BuildRuleResult::Filtered | BuildRuleResult::Unsupported => None,
+        }
+    }
+}
+
+fn restore_overridden_properties(
+    properties: &mut BTreeMap<String, String>,
+    undo: Vec<(String, Option<String>)>,
+) {
+    for (name, previous) in undo {
+        match previous {
+            Some(value) => {
+                properties.insert(name, value);
+            }
+            None => {
+                properties.remove(&name);
+            }
         }
     }
 }
@@ -2010,6 +2080,48 @@ mod tests {
         assert!(name_trie_contains(&blockers, &left_name));
         assert!(name_trie_contains(&blockers, &right_name));
         assert_ne!(projected.id, 0);
+    }
+
+    #[test]
+    fn later_ruleset_references_override_earlier_property_values() {
+        let dir = TempDir::new().expect("temporary directory");
+        let custom = dir.path().join("max20.xml");
+        fs::write(
+            &custom,
+            "<ruleset name=\"t\">\
+             <rule ref=\"LongVariable\">\
+             <properties><property name=\"maximum\" value=\"20\"/></properties>\
+             </rule></ruleset>",
+        )
+        .expect("write custom ruleset");
+        let custom_spec = custom.display().to_string();
+        let mut warn = |_: String| {};
+
+        let maximum_of = |rules: &[LoadedRule]| {
+            rules
+                .iter()
+                .find(|rule| rule.name == "LongVariable")
+                .and_then(|rule| rule.properties.get("maximum").cloned())
+        };
+        let later_custom = load_and_filter(
+            &["rust".to_string(), custom_spec.clone()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load rust,custom");
+        let later_builtin = load_and_filter(
+            &[custom_spec, "rust".to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load custom,rust");
+
+        assert_eq!(maximum_of(&later_custom).as_deref(), Some("20"));
+        assert_eq!(maximum_of(&later_builtin).as_deref(), Some("35"));
     }
 
     #[test]
