@@ -302,21 +302,41 @@ enum StringKind {
 enum LineState {
     /// Not inside a comment or a string carried over from earlier lines.
     Code,
-    /// Inside a block comment that has not closed yet.
-    Block,
+    /// Inside a block comment that has not closed yet, tracking nesting depth.
+    Block { depth: usize },
     /// Inside a string that has not closed yet.
     String { kind: StringKind },
 }
 
 fn line_has_code(line: &str, state: LineState) -> (bool, LineState) {
     match state {
-        LineState::Block => match line.find("*/") {
-            Some(end) => scan_code_line(&line[end + 2..]),
-            None => (false, LineState::Block),
-        },
+        LineState::Block { depth } => scan_block_comment_line(line, depth),
         LineState::String { kind } => line_has_string_code(line, kind),
         LineState::Code => scan_code_line(line),
     }
+}
+
+fn scan_block_comment_line(line: &str, mut depth: usize) -> (bool, LineState) {
+    if depth == 0 {
+        return scan_code_line(line);
+    }
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'/' && bytes[index + 1] == b'*' {
+            depth += 1;
+            index += 2;
+        } else if bytes[index] == b'*' && bytes[index + 1] == b'/' {
+            depth -= 1;
+            index += 2;
+            if depth == 0 {
+                return scan_code_line(&line[index..]);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    (false, LineState::Block { depth })
 }
 
 fn line_has_string_code(line: &str, kind: StringKind) -> (bool, LineState) {
@@ -343,7 +363,8 @@ fn scan_code_line(line: &str) -> (bool, LineState) {
         match code_token(bytes, index) {
             CodeToken::LineComment => return (has_code, LineState::Code),
             CodeToken::BlockComment => {
-                let (code_after, after) = line_has_code(&line[index + 2..], LineState::Block);
+                let (code_after, after) =
+                    line_has_code(&line[index + 2..], LineState::Block { depth: 1 });
                 return (has_code || code_after, after);
             }
             CodeToken::QuotedString { end } | CodeToken::RawString { end } => {
@@ -496,5 +517,34 @@ mod tests {
 
         assert_eq!(EFFECTIVE_LINE_SCANS.with(Cell::get), line_count);
         assert_eq!(EFFECTIVE_LINE_QUERIES.with(Cell::get), line_count);
+    }
+
+    #[test]
+    fn nested_block_comments_across_lines_are_not_counted_as_code() {
+        let source = "fn foo() {\n    /*\n        /* nested */\n        still comment\n    */\n}";
+        let prefix = effective_line_prefix(source);
+        assert_eq!(effective_line_count(&prefix, 1, 6), 2);
+    }
+
+    #[test]
+    fn deep_nested_block_comments_across_lines() {
+        let source = "fn foo() {\n    /* level 1\n        /* level 2\n            /* level 3 */\n        level 2 */\n    level 1 */\n}";
+        let prefix = effective_line_prefix(source);
+        assert_eq!(effective_line_count(&prefix, 1, 7), 2);
+    }
+
+    #[test]
+    fn code_after_nested_block_comment_close_on_same_line() {
+        let source = "fn foo() {\n    /*\n        /* nested */\n    */ let x = 1;\n}";
+        let prefix = effective_line_prefix(source);
+        assert_eq!(effective_line_count(&prefix, 1, 5), 3);
+        assert_eq!(effective_line_count(&prefix, 4, 4), 1);
+    }
+
+    #[test]
+    fn single_line_nested_block_comment_with_surrounding_code() {
+        let source = "let a = 1; /* /* inner */ */ let b = 2;";
+        let prefix = effective_line_prefix(source);
+        assert_eq!(effective_line_count(&prefix, 1, 1), 1);
     }
 }
