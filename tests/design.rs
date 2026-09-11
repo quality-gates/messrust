@@ -1027,6 +1027,49 @@ fn lack_of_cohesion_skips_multi_statement_bodies_as_accessors() {
 }
 
 #[test]
+fn lack_of_cohesion_reports_disjoint_tuple_fields() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "tuple_lcom.rs",
+        "struct TuplePair(i32, i32);\nimpl TuplePair {\n    fn inc_left(&mut self) { self.0 += 1; }\n    fn inc_right(&mut self) { self.1 += 1; }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "LackOfCohesionOfMethods",
+        "The TuplePair has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.",
+    );
+}
+
+#[test]
+fn lack_of_cohesion_links_methods_through_shared_tuple_field() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "tuple_shared.rs",
+        "struct Wrap(i32, i32);\nimpl Wrap {\n    fn one(&self) -> i32 { 1 }\n    fn two(&self) -> i32 { 2 }\n    fn bump(&mut self) { self.0 += self.one(); }\n    fn drop_by(&mut self) { self.0 -= self.two(); }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn lack_of_cohesion_allows_tuple_field_accessors() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "tuple_accessors.rs",
+        "struct Pair(i32, i32);\nimpl Pair {\n    fn get_first(&self) -> i32 { self.0 }\n    fn get_second(&self) -> i32 { self.1 }\n    fn set_first(&mut self, v: i32) { self.0 = v; }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "LackOfCohesionOfMethods");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
 fn lack_of_cohesion_reports_after_quiet_enum() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

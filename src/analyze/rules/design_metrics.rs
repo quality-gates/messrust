@@ -465,11 +465,19 @@ fn assigned_receiver_field(assignment: &syn::ExprAssign) -> Option<String> {
 
 
 fn receiver_field(field: &syn::ExprField) -> Option<String> {
-    let (syn::Expr::Path(base), Member::Named(identifier)) = (&*field.base, &field.member) else {
+    let syn::Expr::Path(base) = &*field.base else {
         return None;
     };
-    let name = identifier.to_string();
-    path_is_self(base).then_some(name)
+    path_is_self(base).then(|| member_name(&field.member))
+}
+
+
+/// Field name as the model indexes it: tuple fields are `"0"`, `"1"`, ...
+fn member_name(member: &Member) -> String {
+    match member {
+        Member::Named(ident) => ident.to_string(),
+        Member::Unnamed(index) => index.index.to_string(),
+    }
 }
 
 
@@ -506,14 +514,9 @@ struct ReceiverUseCollector<'a> {
 
 impl<'ast> Visit<'ast> for ReceiverUseCollector<'_> {
     fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
-        if let syn::Expr::Path(p) = &*node.base {
-            if path_is_self(p) {
-                if let Member::Named(ident) = &node.member {
-                    let name = ident.to_string();
-                    if self.fields.contains(&name) {
-                        self.used_fields.push(name);
-                    }
-                }
+        if let Some(name) = receiver_field(node) {
+            if self.fields.contains(&name) {
+                self.used_fields.push(name);
             }
         }
         syn::visit::visit_expr_field(self, node);
