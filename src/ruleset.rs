@@ -963,6 +963,7 @@ struct RulesetLoader<'a> {
     loaded: LoadedRuleNames,
     opts: &'a LoadOptions,
     warn: &'a mut dyn FnMut(String),
+    resolved_rule_count: usize,
 }
 
 fn expansion_key(source_id: &str, rule_name: &str) -> ExpansionKey {
@@ -977,6 +978,7 @@ impl<'a> RulesetLoader<'a> {
             loaded: LoadedRuleNames::default(),
             opts,
             warn,
+            resolved_rule_count: 0,
         }
     }
 
@@ -1197,6 +1199,7 @@ impl<'a> RulesetLoader<'a> {
         if !source_rule.ref_path.is_empty() {
             return self.add_ref_with_boundary(out, source_rule, true, base);
         }
+        self.resolved_rule_count += 1;
         Ok(self
             .emit_rule(out, source_name, source_rule, true)
             .map_or_else(empty_summary, |rule| rules_summary(vec![rule])))
@@ -1220,11 +1223,13 @@ impl<'a> RulesetLoader<'a> {
                         condition: BlockCondition::Excluded,
                     });
                 }
+                self.resolved_rule_count += 1;
                 continue;
             }
             if !source_rule.ref_path.is_empty() {
                 children.push(self.add_ref_with_boundary(out, source_rule, false, base)?);
             } else if !source_rule.class.is_empty() {
+                self.resolved_rule_count += 1;
                 if let Some(rule) = self.emit_rule(out, source_name, source_rule, false) {
                     local_rules.push(rule);
                 }
@@ -1279,8 +1284,11 @@ pub fn load_and_filter(
     for spec in specs {
         loader.load_one(spec, &mut rules)?;
     }
-    if rules.is_empty() && specs.is_empty() {
+    if specs.is_empty() {
         return Err("no rulesets specified".to_string());
+    }
+    if loader.resolved_rule_count == 0 {
+        return Err("no rules were loaded from the specified rulesets".to_string());
     }
     apply_name_filters(&mut rules, only, disable)?;
     Ok(rules)
