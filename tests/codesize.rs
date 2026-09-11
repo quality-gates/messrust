@@ -720,6 +720,29 @@ fn effective_lines_of_code_skips_a_multiline_block_comment() {
 }
 
 #[test]
+fn effective_lines_of_code_skips_a_multiline_nested_block_comment() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested_comment.rs",
+        "pub fn test_nested() {\n    /*\n        /* nested */\n        this is still inside the comment!\n    */\n}\n",
+    );
+    // With minimum = 3, having 2 effective lines does not fire.
+    let xml_min3 = eml_ignore_ws_xml(dir.path(), "eml_min3.xml", 3);
+    let (code3, out3, err3) =
+        run_cli(&[path.to_str().unwrap(), "text", xml_min3.to_str().unwrap()]);
+    assert_eq!(code3, EXIT_SUCCESS, "stdout={out3:?} stderr={err3:?}");
+    assert!(!out3.contains("ExcessiveMethodLength"), "stdout={out3:?}");
+
+    // With minimum = 2, it fires reporting exactly 2 lines of code.
+    let xml_min2 = eml_ignore_ws_xml(dir.path(), "eml_min2.xml", 2);
+    let (code2, out2, err2) =
+        run_cli(&[path.to_str().unwrap(), "text", xml_min2.to_str().unwrap()]);
+    assert_eq!(code2, EXIT_VIOLATION, "stderr={err2:?}");
+    assert!(out2.contains("has 2 lines of code"), "stdout={out2:?}");
+}
+
+#[test]
 fn effective_lines_of_code_ignores_comment_markers_inside_strings() {
     let dir = TempDir::new().unwrap();
     let body: String = (0..30)
