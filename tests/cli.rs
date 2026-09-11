@@ -983,6 +983,22 @@ fn maximumpriority_five_is_accepted() {
 }
 
 #[test]
+fn default_maximumpriority_includes_priority_one_rules() {
+    // This test stops the mutation from 1 to 2 for the default Options max_priority.
+    // CleanCode has BooleanArgumentFlag with priority 1.
+    // Without --maximumpriority, the tool loads and reports priority 1 rules.
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fixture.rs",
+        "fn process(flag: bool) { let _ = flag; }\n",
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "cleancode"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("BooleanArgumentFlag"), "stdout={out:?}");
+}
+
+#[test]
 fn value_option_before_positionals_consumes_exactly_one_argument() {
     // Kills parse_args `i += 1` body/±1 mutants on the value skip.
     // Correct: suffixes=[.txt] so hit.txt is analyzed and miss.rs is not.
