@@ -701,6 +701,51 @@ fn self_named_reference_to_a_direct_rule_is_valid() {
 }
 
 #[test]
+fn later_ruleset_reference_overrides_earlier_property_values() {
+    // docs/usage.md: "Later references override earlier priority and
+    // property values." A 27-character local name fires LongVariable at
+    // maximum 20 but not at the built-in default 35, in either order.
+    let dir = TempDir::new().unwrap();
+    let source = write_file(
+        dir.path(),
+        "lib.rs",
+        "fn okay() { let twenty_five_char_name_xxxxx = 1; }\n",
+    );
+    let custom = dir.path().join("max20.xml");
+    fs::write(
+        &custom,
+        r#"<ruleset name="Max 20">
+  <rule ref="LongVariable">
+    <properties><property name="maximum" value="20"/></properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        &format!("rust,{}", custom.display()),
+        "--only",
+        "LongVariable",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("LongVariable"), "stdout={out:?}");
+    assert!(out.contains("under 20"), "stdout={out:?}");
+
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        &format!("{},rust", custom.display()),
+        "--only",
+        "LongVariable",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+}
+
+#[test]
 fn nested_named_references_keep_override_precedence() {
     let dir = TempDir::new().unwrap();
     let source = write_file(dir.path(), "fixture.rs", &fixture_with_params(6));
@@ -711,7 +756,7 @@ fn nested_named_references_keep_override_precedence() {
         r#"<ruleset name="Middle">
   <rule ref="codesize/ExcessiveParameterList" message="Middle {0}">
     <priority>2</priority>
-    <properties><property name="minimum" value="7"/></properties>
+    <properties><property name="minimum" value="5"/></properties>
   </rule>
 </ruleset>
 "#,
@@ -723,7 +768,7 @@ fn nested_named_references_keep_override_precedence() {
             r#"<ruleset name="Outer">
   <rule ref="{}/ExcessiveParameterList" message="Outer {{2}}">
     <priority>1</priority>
-    <properties><property name="minimum" value="5"/></properties>
+    <properties><property name="minimum" value="7"/></properties>
   </rule>
 </ruleset>
 "#,
