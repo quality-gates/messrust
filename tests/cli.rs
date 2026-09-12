@@ -67,6 +67,41 @@ fn deeply_nested_if_blocks(depth: usize) -> String {
     source
 }
 
+fn deeply_nested_generics(depth: usize) -> String {
+    let mut source = String::from("fn f() -> ");
+    source.extend(std::iter::repeat_n("Option<", depth));
+    source.push_str("i32");
+    source.extend(std::iter::repeat_n('>', depth));
+    source.push_str(" { None }\n");
+    source
+}
+
+fn long_binary_operator_chain(terms: usize, op: &str) -> String {
+    let mut source = String::from("fn f() -> bool { ");
+    for i in 0..terms {
+        if i > 0 {
+            source.push(' ');
+            source.push_str(op);
+            source.push(' ');
+        }
+        source.push_str("true");
+    }
+    source.push_str(" }\n");
+    source
+}
+
+fn long_addition_chain(terms: usize) -> String {
+    let mut source = String::from("fn f() -> i32 { ");
+    for i in 0..terms {
+        if i > 0 {
+            source.push_str(" + ");
+        }
+        source.push('1');
+    }
+    source.push_str(" }\n");
+    source
+}
+
 #[test]
 fn binary_smoke_runs_the_real_entrypoint_across_exit_codes() {
     // src/main.rs exits with the code that messrust::run returns. These
@@ -373,6 +408,125 @@ fn shallow_nested_expression_is_still_analyzed() {
 
     assert_eq!(code, EXIT_VIOLATION, "stdout={out:?} stderr={err:?}");
     assert!(out.contains("ExcessiveParameterList"), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn deeply_nested_generic_shapes_are_processing_errors() {
+    let depths = [200, 600, 1100, 5000, 20000];
+    for depth in depths {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(dir.path(), &format!("generic_{depth}.rs"), &deeply_nested_generics(depth));
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+        assert_eq!(code, EXIT_ERROR, "depth={depth} stdout={out:?} stderr={err:?}");
+        assert!(
+            out.contains(&format!("{}\t-\t", path.display())),
+            "deep generic file must produce a processing error: depth={depth} stdout={out:?}"
+        );
+        assert!(err.is_empty(), "depth={depth} stderr={err:?}");
+    }
+}
+
+#[test]
+fn long_binary_operator_chains_are_processing_errors() {
+    let cases = [
+        ("and_10000.rs", long_binary_operator_chain(10000, "&&")),
+        ("and_19399.rs", long_binary_operator_chain(19399, "&&")),
+        ("and_100000.rs", long_binary_operator_chain(100000, "&&")),
+        ("or_10000.rs", long_binary_operator_chain(10000, "||")),
+        ("add_10000.rs", long_addition_chain(10000)),
+    ];
+    for (name, source) in cases {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(dir.path(), name, &source);
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+        assert_eq!(code, EXIT_ERROR, "name={name} stdout={out:?} stderr={err:?}");
+        assert!(
+            out.contains(&format!("{}\t-\t", path.display())),
+            "long operator chain must produce a processing error: name={name} stdout={out:?}"
+        );
+        assert!(err.is_empty(), "name={name} stderr={err:?}");
+    }
+}
+
+#[test]
+fn nested_parentheses_at_1000_and_5000_are_processing_errors() {
+    for depth in [1000, 5000] {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(dir.path(), &format!("parens_{depth}.rs"), &deeply_nested_parentheses(depth));
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+        assert_eq!(code, EXIT_ERROR, "depth={depth} stdout={out:?} stderr={err:?}");
+        assert!(
+            out.contains(&format!("{}\t-\t", path.display())),
+            "nested parens must produce a processing error: depth={depth} stdout={out:?}"
+        );
+        assert!(err.is_empty(), "depth={depth} stderr={err:?}");
+    }
+}
+
+#[test]
+fn scanning_good_file_and_over_deep_file_reports_both_and_exits_one() {
+    let dir = TempDir::new().unwrap();
+    let deep = write_file(dir.path(), "deep_opt.rs", &deeply_nested_generics(1100));
+    let valid = write_file(dir.path(), "valid.rs", &fixture_with_params(11));
+    let paths = format!("{},{}", deep.display(), valid.display());
+
+    let (code, out, err) = run_cli(&[&paths, "text", "codesize"]);
+
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(
+        out.contains(&format!("{}\t-\t", deep.display())),
+        "over-deep file must produce a processing error: stdout={out:?}"
+    );
+    assert!(
+        out.contains(valid.to_str().unwrap()) && out.contains("ExcessiveParameterList"),
+        "the valid file must still be analyzed: stdout={out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn scanning_good_file_and_over_deep_file_with_ignore_errors_exits_two() {
+    let dir = TempDir::new().unwrap();
+    let deep = write_file(dir.path(), "deep_opt.rs", &deeply_nested_generics(1100));
+    let valid = write_file(dir.path(), "valid.rs", &fixture_with_params(11));
+    let paths = format!("{},{}", deep.display(), valid.display());
+
+    let (code, out, err) = run_cli(&[
+        &paths,
+        "text",
+        "codesize",
+        "--ignore-errors-on-exit",
+    ]);
+
+    assert_eq!(code, EXIT_VIOLATION, "stdout={out:?} stderr={err:?}");
+    assert!(
+        out.contains(&format!("{}\t-\t", deep.display())),
+        "over-deep file must produce a processing error: stdout={out:?}"
+    );
+    assert!(
+        out.contains(valid.to_str().unwrap()) && out.contains("ExcessiveParameterList"),
+        "the valid file must still be analyzed: stdout={out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn ordinary_source_nesting_and_operator_chains_are_analyzed() {
+    let dir = TempDir::new().unwrap();
+    let gen_source = deeply_nested_generics(20);
+    let gen_path = write_file(dir.path(), "gen20.rs", &gen_source);
+    let (code, out, err) = run_cli(&[gen_path.to_str().unwrap(), "text", "codesize"]);
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+    assert!(!out.contains("\t-\t"), "generic nesting 20 must not be a processing error: stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+
+    let op_source = long_binary_operator_chain(200, "&&");
+    let op_path = write_file(dir.path(), "op200.rs", &op_source);
+    let (code, out, err) = run_cli(&[op_path.to_str().unwrap(), "text", "codesize"]);
+    assert_eq!(code, EXIT_VIOLATION, "stdout={out:?} stderr={err:?}");
+    assert!(!out.contains("\t-\t"), "operator chain 200 must not be a processing error: stdout={out:?}");
+    assert!(out.contains("CyclomaticComplexity"), "stdout={out:?}");
     assert!(err.is_empty(), "stderr={err:?}");
 }
 
