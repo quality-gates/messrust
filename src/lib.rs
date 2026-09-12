@@ -143,7 +143,7 @@ fn print_usage(w: &mut dyn Write) {
            --exclude <substr[,substr...]>   Skip paths containing a substring\n\
            --only, --enable <rules>         Keep only named loaded rules\n\
            --disable <rules>                Remove named loaded rules\n\
-           --ignore-tests                   Skip conventional Rust test files\n\
+           --ignore-tests                   Skip test files and cfg(test) code\n\
            --strict                         Include source-suppressed findings\n\
            --color                          Colorize text output\n\
            --verbose, -v                    Ruleset/load diagnostics\n\

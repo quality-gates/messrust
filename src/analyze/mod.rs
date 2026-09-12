@@ -65,7 +65,7 @@ pub(crate) fn analyze_one(
     let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let file = parse::parse_file(&src)?;
     let file_name = path.display().to_string();
-    let model = FileModel::from_file(&file, &src);
+    let model = FileModel::from_file(&file, &src, ignore_tests);
     let mut violations = Vec::new();
     for rule in rules {
         apply_rule(rule, &file_name, &model, &mut violations);
