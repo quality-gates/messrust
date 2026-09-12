@@ -383,15 +383,39 @@ pub(crate) fn collect_format_captures(tokens: TokenStream, reads: &mut HashSet<S
 
 
 pub(crate) fn format_capture_names(format: &str) -> Vec<String> {
-    static CAPTURE: OnceLock<Regex> = OnceLock::new();
-    let capture = CAPTURE.get_or_init(|| {
-        Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)(?:[}:])").expect("valid format capture regex")
+    static FIELD: OnceLock<Regex> = OnceLock::new();
+    static SPEC_CAPTURE: OnceLock<Regex> = OnceLock::new();
+    let field =
+        FIELD.get_or_init(|| Regex::new(r"\{([^{}]*)\}").expect("valid format field regex"));
+    let spec_capture = SPEC_CAPTURE.get_or_init(|| {
+        Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\$").expect("valid format spec capture regex")
     });
+
     let unescaped = format.replace("{{", "");
-    capture
-        .captures_iter(&unescaped)
-        .filter_map(|captures| captures.get(1).map(|name| name.as_str().to_string()))
-        .collect()
+    let mut names = Vec::new();
+    for captures in field.captures_iter(&unescaped) {
+        let content = &captures[1];
+        if let Some((arg, spec)) = content.split_once(':') {
+            if is_ident(arg) {
+                names.push(arg.to_string());
+            }
+            for spec_captures in spec_capture.captures_iter(spec) {
+                if let Some(name) = spec_captures.get(1) {
+                    names.push(name.as_str().to_string());
+                }
+            }
+        } else if is_ident(content) {
+            names.push(content.to_string());
+        }
+    }
+    names
+}
+
+
+fn is_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '_'))
+        && chars.all(|ch| matches!(ch, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
 }
 
 
@@ -418,4 +442,35 @@ pub(crate) fn is_binding_name(name: &str) -> bool {
     name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn format_capture_names_captures_width_form() {
+        assert_eq!(format_capture_names("{:width$}"), vec!["width"]);
+    }
+
+    #[test]
+    fn format_capture_names_captures_precision_form() {
+        assert_eq!(format_capture_names("{:.prec$}"), vec!["prec"]);
+    }
+
+    #[test]
+    fn format_capture_names_captures_combined_value_and_width_form() {
+        assert_eq!(
+            format_capture_names("{value:width$}"),
+            vec!["value", "width"]
+        );
+    }
+
+    #[test]
+    fn format_capture_names_ignores_negative_cases() {
+        assert!(format_capture_names("{{width}}").is_empty());
+        assert!(format_capture_names("{:.*}").is_empty());
+        assert!(format_capture_names("{:5}").is_empty());
+        assert!(format_capture_names("{:1$}").is_empty());
+        assert!(format_capture_names("{}").is_empty());
+        assert!(format_capture_names("{0}").is_empty());
+    }
+}

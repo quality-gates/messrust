@@ -158,6 +158,62 @@ fn unused_local_variable_counts_rust_format_capture_as_a_read() {
 }
 
 #[test]
+fn unused_local_variable_counts_format_width_and_precision_captures() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "format_width_prec.rs",
+        r#"
+fn main() {
+    let width = 3;
+    println!("{:width$}", 1);
+    let prec = 2;
+    println!("{:.prec$}", 1.2345);
+    let value = 7;
+    let width2 = 4;
+    println!("{value:width2$}");
+    let width3 = 5;
+    panic!("{:width3$}", 1);
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_variable_reports_unread_with_escaped_format_braces() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "escaped_braces.rs",
+        r#"
+fn main() {
+    let width = 3;
+    println!("{{width}}");
+    let dead_local = 10;
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as 'width'.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        5,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as 'dead_local'.",
+    );
+}
+
+#[test]
 fn unused_local_variable_counts_assignment_index_as_a_read() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
