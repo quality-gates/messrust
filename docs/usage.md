@@ -73,7 +73,7 @@ What each rule catches, and which ones live in `rust` versus `opinionated`:
 | `--version` | Show the package version. |
 | `--suffixes LIST` | Replace the default `.rs` suffix list. |
 | `--exclude LIST` | Skip paths that contain any listed substring. |
-| `--ignore-tests` | Skip test files, test directories, and `#[cfg(test)]` modules. Use this for a production-code gate. |
+| `--ignore-tests` | Skip test files, test directories, `#[cfg(test)]` modules, and `#[cfg(test)]` `impl` blocks and methods. Use this for a production-code gate. |
 | `--only LIST`, `--enable LIST` | Keep only named rules already present in the loaded policy. Useful for bisecting a noisy run. |
 | `--disable LIST` | Remove named loaded rules without writing new XML. |
 | `--minimumpriority N` | Keep priorities `<= N`. Priority `1` is highest. |
@@ -106,6 +106,9 @@ the report.
 - Discovery skips `.git`, `target`, and `node_modules`.
 - Tests are included unless `--ignore-tests` is set, so excluding test quality
   is an explicit choice.
+- With `--ignore-tests`, a method that only compiles with `test` on does not
+  count toward the metrics of its type. A type then has the same code size,
+  complexity, coupling, and cohesion as it has in a production build.
 - A malformed or unreadable file becomes a processing error. Other valid files
   still analyze.
 

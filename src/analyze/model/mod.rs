@@ -283,10 +283,13 @@ pub(crate) struct StaticMutSite {
 
 
 impl<'a> FileModel<'a> {
-    pub(crate) fn from_file(file: &'a syn::File, src: &'a str) -> Self {
+    /// Builds the model of one file. With `ignore_tests` set, an `impl`
+    /// block or a method that only compiles with `test` on does not enter
+    /// the model, so no type metric counts it.
+    pub(crate) fn from_file(file: &'a syn::File, src: &'a str, ignore_tests: bool) -> Self {
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
-        collect_items(&file.items, "", &mut types, &mut functions);
+        collect_items(&file.items, "", &mut types, &mut functions, ignore_tests);
         let mut metric_functions_by_parent: HashMap<String, Vec<usize>> = HashMap::new();
         for (index, function) in functions.iter().enumerate() {
             if !function.counts_for_type_metrics {
@@ -354,7 +357,7 @@ mod tests {
             ));
         }
         let file = syn::parse_file(&source).expect("parse generated source");
-        let model = FileModel::from_file(&file, &source);
+        let model = FileModel::from_file(&file, &source, false);
         METRIC_PARENT_LOOKUPS.with(|lookups| lookups.set(0));
         METRIC_FUNCTION_VISITS.with(|visits| visits.set(0));
 

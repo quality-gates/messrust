@@ -10,6 +10,7 @@ use syn::{
 };
 
 use crate::analyze::helpers::is_public;
+use crate::analyze::is_test_module;
 
 use super::use_def::is_binding_name;
 use super::{
@@ -133,6 +134,7 @@ pub(crate) fn collect_items<'a>(
     scope: &str,
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
+    ignore_tests: bool,
 ) {
     for item in items {
         match item {
@@ -141,8 +143,10 @@ pub(crate) fn collect_items<'a>(
             Item::Union(u) => insert_union(types, u, scope),
             Item::Trait(t) => insert_trait(types, t, functions, scope),
             Item::Fn(f) => functions.push(fn_from_item(f)),
-            Item::Impl(im) => attach_impl(types, functions, im, scope),
-            Item::Mod(module) => collect_module_items(module, scope, types, functions),
+            Item::Impl(im) => attach_impl(types, functions, im, scope, ignore_tests),
+            Item::Mod(module) => {
+                collect_module_items(module, scope, types, functions, ignore_tests)
+            }
             _ => {}
         }
     }
@@ -154,11 +158,12 @@ pub(crate) fn collect_module_items<'a>(
     scope: &str,
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
+    ignore_tests: bool,
 ) {
     if let Some((_, nested)) = &module.content {
         let mod_name = module.ident.to_string();
         let new_scope = scoped_key(scope, &mod_name);
-        collect_items(nested, &new_scope, types, functions);
+        collect_items(nested, &new_scope, types, functions, ignore_tests);
     }
 }
 
@@ -417,25 +422,70 @@ pub(crate) fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
 }
 
 
+/// Key of the type that an `impl` block belongs to. A key that the model
+/// already holds wins, so an `impl` block joins the declaration of its type.
+fn impl_type_key(types: &HashMap<String, TypeModel<'_>>, im: &ItemImpl, scope: &str) -> String {
+    let full_path = full_type_path_from_type(&im.self_ty);
+    let scoped = scoped_key(scope, &full_path);
+    if !types.contains_key(&scoped) && types.contains_key(&full_path) {
+        return full_path;
+    }
+    scoped
+}
+
+
+fn attach_impl_method<'a>(
+    types: &mut HashMap<String, TypeModel<'a>>,
+    functions: &mut Vec<FnModel<'a>>,
+    method: &'a syn::ImplItemFn,
+    owner: (&str, &str),
+    inherent: bool,
+) {
+    let (ty_name, key) = owner;
+    let begin_line = method.sig.fn_token.span().start().line;
+    let end_line = method.span().end().line;
+    let name = method.sig.ident.to_string();
+    if inherent {
+        if let Some(type_model) = types.get_mut(key) {
+            type_model.methods.push(MethodRef {
+                name: name.clone(),
+                begin_line,
+                end_line,
+                is_public: is_public(&method.vis),
+                body: Some(&method.block),
+            });
+        }
+    }
+    functions.push(FnModel {
+        name,
+        parent: Some(ty_name.to_string()),
+        parent_key: Some(key.to_string()),
+        begin_line,
+        end_line,
+        param_count: count_params(&method.sig.inputs),
+        bool_params: bool_params(&method.sig.inputs),
+        body: Some(&method.block),
+        returns_bool: returns_bool(&method.sig.output),
+        dep_types: sig_dep_types(&method.sig),
+        counts_for_type_metrics: inherent,
+    });
+}
+
+
 pub(crate) fn attach_impl<'a>(
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
     im: &'a ItemImpl,
     scope: &str,
+    ignore_tests: bool,
 ) {
     let ty_name = type_name_from_path(&im.self_ty);
-    if ty_name.is_empty() {
+    // A test-only `impl` block holds no production code. Keep the whole block
+    // out of the model, so no type metric counts its methods.
+    if ty_name.is_empty() || (ignore_tests && is_test_module(&im.attrs)) {
         return;
     }
-    let full_path = full_type_path_from_type(&im.self_ty);
-    let scoped = scoped_key(scope, &full_path);
-    let key = if types.contains_key(&scoped) {
-        scoped
-    } else if types.contains_key(&full_path) {
-        full_path
-    } else {
-        scoped
-    };
+    let key = impl_type_key(types, im, scope);
     types.entry(key.clone()).or_insert_with(|| TypeModel {
         key: key.clone(),
         name: ty_name.clone(),
@@ -448,35 +498,16 @@ pub(crate) fn attach_impl<'a>(
         methods: Vec::new(),
         has_declaration: false,
     });
+    let inherent = im.trait_.is_none();
     for item in &im.items {
-        if let syn::ImplItem::Fn(m) = item {
-            let begin = m.sig.fn_token.span().start().line;
-            let end = m.span().end().line;
-            let name = m.sig.ident.to_string();
-            let is_pub = is_public(&m.vis);
-            if im.trait_.is_none() {
-                types.get_mut(&key).unwrap().methods.push(MethodRef {
-                    name: name.clone(),
-                    begin_line: begin,
-                    end_line: end,
-                    is_public: is_pub,
-                    body: Some(&m.block),
-                });
-            }
-            functions.push(FnModel {
-                name,
-                parent: Some(ty_name.clone()),
-                parent_key: Some(key.clone()),
-                begin_line: begin,
-                end_line: end,
-                param_count: count_params(&m.sig.inputs),
-                bool_params: bool_params(&m.sig.inputs),
-                body: Some(&m.block),
-                returns_bool: returns_bool(&m.sig.output),
-                dep_types: sig_dep_types(&m.sig),
-                counts_for_type_metrics: im.trait_.is_none(),
-            });
+        let syn::ImplItem::Fn(method) = item else {
+            continue;
+        };
+        // A method with its own test-only `cfg` attribute drops the same way.
+        if ignore_tests && is_test_module(&method.attrs) {
+            continue;
         }
+        attach_impl_method(types, functions, method, (&ty_name, &key), inherent);
     }
 }
 
