@@ -53,7 +53,7 @@ pub(crate) fn func_violation(
     Violation {
         file: file.to_string(),
         begin_line: f.begin_line,
-        end_line: f.begin_line,
+        end_line: f.end_line,
         rule_name: rule.name.clone(),
         ruleset_name: rule.ruleset_name.clone(),
         description,
@@ -77,7 +77,7 @@ pub(crate) fn type_violation(
     Violation {
         file: file.to_string(),
         begin_line: t.begin_line,
-        end_line: t.begin_line,
+        end_line: t.end_line,
         rule_name: rule.name.clone(),
         ruleset_name: rule.ruleset_name.clone(),
         description,

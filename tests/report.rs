@@ -505,6 +505,100 @@ fn json_format_carries_class_and_method_for_impl_methods() {
     assert_eq!(violation["function"], "");
 }
 
+#[test]
+fn structured_formats_report_function_and_type_end_lines() {
+    let (_td, root) = tmp();
+    let path = write_file(
+        &root,
+        "fixture.rs",
+        "fn long_function() {\n    let first = 1;\n    let second = 2;\n    let third = first + second;\n}\nstruct LongType {\n    field: i32,\n}\n",
+    );
+    let ruleset = write_file(
+        &root,
+        "issue-161.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Issue 161">
+  <rule ref="codesize/ExcessiveMethodLength">
+    <properties>
+      <property name="minimum" value="5" />
+    </properties>
+  </rule>
+  <rule ref="codesize/ExcessiveClassLength">
+    <properties>
+      <property name="minimum" value="3" />
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let file = path.to_str().unwrap();
+    let ruleset = ruleset.to_str().unwrap();
+
+    for format in ["json", "xml", "sarif"] {
+        let (code, out, err) = run_cli(&[file, format, ruleset]);
+        assert_eq!(code, EXIT_VIOLATION, "format={format} stderr={err:?}");
+        assert!(err.is_empty(), "format={format} stderr={err:?}");
+
+        match format {
+            "json" => {
+                let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+                let violations = report["files"][0]["violations"].as_array().unwrap();
+                let function = violations
+                    .iter()
+                    .find(|violation| violation["rule"] == "ExcessiveMethodLength")
+                    .unwrap();
+                let type_ = violations
+                    .iter()
+                    .find(|violation| violation["rule"] == "ExcessiveClassLength")
+                    .unwrap();
+                assert_eq!(function["beginLine"], 1);
+                assert_eq!(function["endLine"], 5);
+                assert_eq!(type_["beginLine"], 6);
+                assert_eq!(type_["endLine"], 8);
+            }
+            "xml" => {
+                assert!(
+                    out.contains("beginline=\"1\" endline=\"5\" rule=\"ExcessiveMethodLength\""),
+                    "function span missing from XML: {out}"
+                );
+                assert!(
+                    out.contains("beginline=\"6\" endline=\"8\" rule=\"ExcessiveClassLength\""),
+                    "type span missing from XML: {out}"
+                );
+            }
+            "sarif" => {
+                let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+                let results = report["runs"][0]["results"].as_array().unwrap();
+                let function = results
+                    .iter()
+                    .find(|result| result["ruleId"] == "ExcessiveMethodLength")
+                    .unwrap();
+                let type_ = results
+                    .iter()
+                    .find(|result| result["ruleId"] == "ExcessiveClassLength")
+                    .unwrap();
+                assert_eq!(
+                    function["locations"][0]["physicalLocation"]["region"]["startLine"],
+                    1
+                );
+                assert_eq!(
+                    function["locations"][0]["physicalLocation"]["region"]["endLine"],
+                    5
+                );
+                assert_eq!(
+                    type_["locations"][0]["physicalLocation"]["region"]["startLine"],
+                    6
+                );
+                assert_eq!(
+                    type_["locations"][0]["physicalLocation"]["region"]["endLine"],
+                    8
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 // ----- sarif --------------------------------------------------------------
 
 #[test]
