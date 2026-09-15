@@ -1709,3 +1709,178 @@ mod b {
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
     assert!(!out.contains("TooManyPublicMethods"), "stdout={out:?}");
 }
+
+fn assert_imported_impl_joins_declared_type(binding: &str, target: &str) {
+    let dir = TempDir::new().unwrap();
+    let src = format!(
+        r#"mod inner {{
+    pub struct S;
+    impl S {{
+        pub fn inside_one(&self) {{}}
+        pub fn inside_two(&self) {{}}
+    }}
+}}
+
+{binding}
+impl {target} {{
+    pub fn outside_one(&self) {{}}
+}}
+"#
+    );
+    let path = write_file(dir.path(), "imported_impl.rs", &src);
+    let xml = write_file(
+        dir.path(),
+        "imported_impl.xml",
+        r#"<ruleset name="imported-impl">
+  <rule ref="codesize/TooManyMethods">
+    <properties>
+      <property name="maxmethods" value="2"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.contains("TooManyMethods"))
+            .count(),
+        1,
+        "stdout={out:?}"
+    );
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "TooManyMethods",
+        "The struct S has 3 non-getter- and setter-methods. Consider refactoring S to keep number of methods under 2.",
+    );
+}
+
+#[test]
+fn impl_through_use_joins_declared_type_model() {
+    assert_imported_impl_joins_declared_type("use inner::S;", "S");
+}
+
+#[test]
+fn impl_through_renamed_use_joins_declared_type_model() {
+    assert_imported_impl_joins_declared_type("use inner::S as T;", "T");
+}
+
+#[test]
+fn module_scoped_use_resolves_impl_before_use_item() {
+    let dir = TempDir::new().unwrap();
+    let src = r#"mod inner {
+    pub struct S;
+}
+
+mod consumer {
+    impl T {
+        pub fn outside_one(&self) {}
+    }
+
+    use crate::inner::S as T;
+}
+"#;
+    let path = write_file(dir.path(), "module_import.rs", src);
+    let xml = write_file(
+        dir.path(),
+        "module_import.xml",
+        r#"<ruleset name="module-import">
+  <rule ref="codesize/TooManyMethods">
+    <properties>
+      <property name="maxmethods" value="0"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "TooManyMethods",
+        "The struct S has 1 non-getter- and setter-methods. Consider refactoring S to keep number of methods under 0.",
+    );
+}
+
+#[test]
+fn imported_impl_uses_one_model_for_threshold_boundary() {
+    let dir = TempDir::new().unwrap();
+    let mut inside = String::new();
+    for i in 0..26 {
+        inside.push_str(&format!("        pub fn inside_{i}(&self) {{}}\n"));
+    }
+    let mut outside = String::new();
+    for i in 0..3 {
+        outside.push_str(&format!("    pub fn outside_{i}(&self) {{}}\n"));
+    }
+    let src = format!(
+        "mod inner {{\n    pub struct S;\n    impl S {{\n{inside}    }}\n}}\n\
+         use inner::S;\n         impl S {{\n{outside}}}\n"
+    );
+    let path = write_file(dir.path(), "threshold.rs", &src);
+    let max30 = write_file(
+        dir.path(),
+        "max30.xml",
+        r#"<ruleset name="max30">
+  <rule ref="codesize/TooManyMethods">
+    <properties>
+      <property name="maxmethods" value="30"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        max30.to_str().unwrap(),
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+
+    let max28 = write_file(
+        dir.path(),
+        "max28.xml",
+        r#"<ruleset name="max28">
+  <rule ref="codesize/TooManyMethods">
+    <properties>
+      <property name="maxmethods" value="28"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        max28.to_str().unwrap(),
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "TooManyMethods",
+        "The struct S has 29 non-getter- and setter-methods. Consider refactoring S to keep number of methods under 28.",
+    );
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.contains("TooManyMethods"))
+            .count(),
+        1,
+        "stdout={out:?}"
+    );
+}

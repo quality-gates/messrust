@@ -22,7 +22,7 @@ use crate::metrics::{effective_line_count, effective_line_prefix};
 use super::helpers::is_public;
 
 use self::build::{
-    collect_items, BindingCollector, DuplicateKeyCollector, StaticMutCollector,
+    collect_items, BindingCollector, DuplicateKeyCollector, StaticMutCollector, TypeImports,
 };
 use self::use_def::UseDefCollector;
 
@@ -289,7 +289,15 @@ impl<'a> FileModel<'a> {
     pub(crate) fn from_file(file: &'a syn::File, src: &'a str, ignore_tests: bool) -> Self {
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
-        collect_items(&file.items, "", &mut types, &mut functions, ignore_tests);
+        let mut type_imports = TypeImports::default();
+        collect_items(
+            &file.items,
+            "",
+            &mut types,
+            &mut functions,
+            &mut type_imports,
+            ignore_tests,
+        );
         let mut metric_functions_by_parent: HashMap<String, Vec<usize>> = HashMap::new();
         for (index, function) in functions.iter().enumerate() {
             if !function.counts_for_type_metrics {
