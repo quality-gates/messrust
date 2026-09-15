@@ -1040,11 +1040,7 @@ impl<'a> RulesetLoader<'a> {
 
     fn load_one(&mut self, ident: &str, out: &mut Vec<LoadedRule>) -> Result<(), String> {
         let (source_id, display_name, source) = self.source(ident)?;
-        let set_name = if source.name.is_empty() {
-            display_name
-        } else {
-            source.name.clone()
-        };
+        let set_name = ruleset_source_name(&source, &display_name);
         self.expand_source(out, &source_id, &source, &set_name, "")
             .map(|_| ())
     }
@@ -1138,6 +1134,10 @@ impl<'a> RulesetLoader<'a> {
         let Some(target) = self.reference_target(rule, base)? else {
             return Ok(empty_summary());
         };
+        if ref_names_missing_rule(&target) {
+            (self.warn)(format!("Cannot resolve rule ref: {}", rule.ref_path));
+            return Ok(empty_summary());
+        }
         let key = expansion_key(&target.source_id, &target.rule_name);
         let kind = if named {
             BoundaryKind::Named
@@ -1178,11 +1178,7 @@ impl<'a> RulesetLoader<'a> {
                 return Ok(None);
             }
         };
-        let source_name = if source.name.is_empty() {
-            display_name
-        } else {
-            source.name.clone()
-        };
+        let source_name = ruleset_source_name(&source, &display_name);
         Ok(Some(ReferenceTarget {
             source_id,
             rule_name,
@@ -1403,6 +1399,19 @@ fn find_source_rule<'a>(source: &'a XmlRuleset, rule_name: &str) -> Option<&'a X
         .rules
         .iter()
         .find(|rule| rule_name_or_ref(rule) == rule_name)
+}
+
+/// True when a typed ref names a rule the resolved ruleset does not define.
+fn ref_names_missing_rule(target: &ReferenceTarget) -> bool {
+    !target.rule_name.is_empty() && find_source_rule(&target.source, &target.rule_name).is_none()
+}
+
+fn ruleset_source_name(source: &XmlRuleset, display_name: &str) -> String {
+    if source.name.is_empty() {
+        display_name.to_string()
+    } else {
+        source.name.clone()
+    }
 }
 
 enum BuildRuleResult {
@@ -2122,6 +2131,119 @@ mod tests {
 
         assert_eq!(maximum_of(&later_custom).as_deref(), Some("20"));
         assert_eq!(maximum_of(&later_builtin).as_deref(), Some("35"));
+    }
+
+    #[test]
+    fn missing_named_rule_ref_warns_with_full_ref() {
+        let dir = TempDir::new().expect("temporary directory");
+        let policy = dir.path().join("typo.xml");
+        fs::write(
+            &policy,
+            "<ruleset name=\"Typo\">\
+             <rule ref=\"codesize/CyclomaticComplxity\"/>\
+             <rule ref=\"codesize/CyclomaticComplexity\"/>\
+             </ruleset>",
+        )
+        .expect("write policy");
+        let mut warnings = Vec::new();
+
+        let rules = load_and_filter(
+            &[policy.display().to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut |message: String| warnings.push(message),
+        )
+        .expect("load policy with one typo ref");
+
+        assert!(rules.iter().any(|rule| rule.name == "CyclomaticComplexity"));
+        assert_eq!(
+            warnings,
+            vec!["Cannot resolve rule ref: codesize/CyclomaticComplxity".to_string()]
+        );
+    }
+
+    #[test]
+    fn unresolvable_ruleset_ref_keeps_a_single_warning() {
+        let dir = TempDir::new().expect("temporary directory");
+        let policy = dir.path().join("badbase.xml");
+        fs::write(
+            &policy,
+            "<ruleset name=\"BadBase\">\
+             <rule ref=\"nosuchruleset/MisspelledName\"/>\
+             </ruleset>",
+        )
+        .expect("write policy");
+        let mut warnings = Vec::new();
+
+        let rules = load_and_filter(
+            &[policy.display().to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut |message: String| warnings.push(message),
+        );
+
+        assert!(rules.is_err());
+        assert_eq!(
+            warnings,
+            vec!["Cannot resolve ref: nosuchruleset/MisspelledName".to_string()]
+        );
+    }
+
+    #[test]
+    fn bare_name_ref_to_unknown_rule_keeps_its_single_warning() {
+        let dir = TempDir::new().expect("temporary directory");
+        let policy = dir.path().join("baretypo.xml");
+        fs::write(
+            &policy,
+            "<ruleset name=\"BareTypo\">\
+             <rule ref=\"CyclomaticComplxity\"/>\
+             </ruleset>",
+        )
+        .expect("write policy");
+        let mut warnings = Vec::new();
+
+        let rules = load_and_filter(
+            &[policy.display().to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut |message: String| warnings.push(message),
+        );
+
+        assert!(rules.is_err());
+        assert_eq!(
+            warnings,
+            vec!["Cannot resolve ref: CyclomaticComplxity".to_string()]
+        );
+    }
+
+    #[test]
+    fn excluded_named_rule_ref_does_not_warn() {
+        let dir = TempDir::new().expect("temporary directory");
+        let policy = dir.path().join("excludes.xml");
+        fs::write(
+            &policy,
+            "<ruleset name=\"Excludes\">\
+             <rule ref=\"codesize/CyclomaticComplexity\">\
+             <exclude name=\"SomeSubrule\"/>\
+             </rule>\
+             </ruleset>",
+        )
+        .expect("write policy");
+        let mut warnings = Vec::new();
+
+        load_and_filter(
+            &[policy.display().to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut |message: String| warnings.push(message),
+        )
+        .expect("load policy with excludes");
+
+        assert!(warnings.is_empty());
     }
 
     #[test]
