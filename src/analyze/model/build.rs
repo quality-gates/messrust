@@ -6,7 +6,7 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
     Fields, FnArg, Item, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemTrait, ItemUnion, Member,
-    ReturnType,
+    ReturnType, UseTree,
 };
 
 use crate::analyze::helpers::is_public;
@@ -129,13 +129,147 @@ fn scoped_key(scope: &str, name: &str) -> String {
 }
 
 
+#[derive(Default)]
+pub(crate) struct TypeImports {
+    bindings: HashMap<String, HashMap<String, Vec<String>>>,
+}
+
+impl TypeImports {
+    fn add(&mut self, scope: &str, name: String, path: Vec<String>) {
+        self.bindings
+            .entry(scope.to_string())
+            .or_default()
+            .insert(name, path);
+    }
+
+    fn lookup(&self, scope: &str, name: &str) -> Option<(String, Vec<String>)> {
+        let mut current = scope.to_string();
+        loop {
+            if let Some(bindings) = self.bindings.get(&current) {
+                if let Some(path) = bindings.get(name) {
+                    return Some((current, path.clone()));
+                }
+            }
+            if current.is_empty() {
+                return None;
+            }
+            current = current
+                .rsplit_once("::")
+                .map_or_else(String::new, |(parent, _)| parent.to_string());
+        }
+    }
+}
+
+
+fn collect_imports(items: &[Item], scope: &str, imports: &mut TypeImports) {
+    for item in items {
+        let Item::Use(use_item) = item else {
+            continue;
+        };
+        let mut prefix = Vec::new();
+        collect_use_tree(&use_item.tree, &mut prefix, scope, imports);
+    }
+}
+
+
+fn collect_use_tree(
+    tree: &UseTree,
+    prefix: &mut Vec<String>,
+    scope: &str,
+    imports: &mut TypeImports,
+) {
+    match tree {
+        UseTree::Path(path) => {
+            prefix.push(path.ident.to_string());
+            collect_use_tree(&path.tree, prefix, scope, imports);
+            prefix.pop();
+        }
+        UseTree::Name(name) => {
+            let imported_name = name.ident.to_string();
+            if imported_name == "self" {
+                let Some(alias) = prefix.last().cloned() else {
+                    return;
+                };
+                imports.add(scope, alias, prefix.clone());
+            } else {
+                prefix.push(imported_name.clone());
+                imports.add(scope, imported_name, prefix.clone());
+                prefix.pop();
+            }
+        }
+        UseTree::Rename(rename) => {
+            prefix.push(rename.ident.to_string());
+            imports.add(scope, rename.rename.to_string(), prefix.clone());
+            prefix.pop();
+        }
+        UseTree::Glob(_) => {}
+        UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_tree(item, prefix, scope, imports);
+            }
+        }
+    }
+}
+
+
+fn scope_parent(scope: &str) -> String {
+    scope
+        .rsplit_once("::")
+        .map_or_else(String::new, |(parent, _)| parent.to_string())
+}
+
+
+fn resolve_type_path(path: &str, scope: &str, imports: &TypeImports) -> String {
+    let segments: Vec<_> = path.split("::").map(str::to_string).collect();
+    let mut seen = HashSet::new();
+    resolve_type_segments(&segments, scope, imports, &mut seen).join("::")
+}
+
+
+fn resolve_type_segments(
+    segments: &[String],
+    scope: &str,
+    imports: &TypeImports,
+    seen: &mut HashSet<String>,
+) -> Vec<String> {
+    let Some(first) = segments.first() else {
+        return Vec::new();
+    };
+    match first.as_str() {
+        "crate" => resolve_type_segments(&segments[1..], "", imports, seen),
+        "self" => resolve_type_segments(&segments[1..], scope, imports, seen),
+        "super" => resolve_type_segments(&segments[1..], &scope_parent(scope), imports, seen),
+        _ => {
+            if let Some((binding_scope, binding_path)) = imports.lookup(scope, first) {
+                let marker = format!("{binding_scope}::{first}");
+                if seen.insert(marker) {
+                    let mut resolved =
+                        resolve_type_segments(&binding_path, &binding_scope, imports, seen);
+                    resolved.extend(segments.iter().skip(1).cloned());
+                    return resolved;
+                }
+            }
+            let mut resolved: Vec<_> = scope
+                .split("::")
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect();
+            resolved.extend(segments.iter().cloned());
+            resolved
+        }
+    }
+}
+
+
 pub(crate) fn collect_items<'a>(
     items: &'a [Item],
     scope: &str,
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
+    imports: &mut TypeImports,
     ignore_tests: bool,
 ) {
+    collect_imports(items, scope, imports);
     for item in items {
         match item {
             Item::Struct(s) => insert_struct(types, s, scope),
@@ -143,9 +277,9 @@ pub(crate) fn collect_items<'a>(
             Item::Union(u) => insert_union(types, u, scope),
             Item::Trait(t) => insert_trait(types, t, functions, scope),
             Item::Fn(f) => functions.push(fn_from_item(f)),
-            Item::Impl(im) => attach_impl(types, functions, im, scope, ignore_tests),
+            Item::Impl(im) => attach_impl(types, functions, im, scope, imports, ignore_tests),
             Item::Mod(module) => {
-                collect_module_items(module, scope, types, functions, ignore_tests)
+                collect_module_items(module, scope, types, functions, imports, ignore_tests)
             }
             _ => {}
         }
@@ -158,12 +292,13 @@ pub(crate) fn collect_module_items<'a>(
     scope: &str,
     types: &mut HashMap<String, TypeModel<'a>>,
     functions: &mut Vec<FnModel<'a>>,
+    imports: &mut TypeImports,
     ignore_tests: bool,
 ) {
     if let Some((_, nested)) = &module.content {
         let mod_name = module.ident.to_string();
         let new_scope = scoped_key(scope, &mod_name);
-        collect_items(nested, &new_scope, types, functions, ignore_tests);
+        collect_items(nested, &new_scope, types, functions, imports, ignore_tests);
     }
 }
 
@@ -424,13 +559,25 @@ pub(crate) fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
 
 /// Key of the type that an `impl` block belongs to. A key that the model
 /// already holds wins, so an `impl` block joins the declaration of its type.
-fn impl_type_key(types: &HashMap<String, TypeModel<'_>>, im: &ItemImpl, scope: &str) -> String {
+fn impl_type_key(
+    types: &HashMap<String, TypeModel<'_>>,
+    im: &ItemImpl,
+    scope: &str,
+    imports: &TypeImports,
+) -> String {
     let full_path = full_type_path_from_type(&im.self_ty);
+    let resolved_path = resolve_type_path(&full_path, scope, imports);
+    if types.contains_key(&resolved_path) {
+        return resolved_path;
+    }
     let scoped = scoped_key(scope, &full_path);
-    if !types.contains_key(&scoped) && types.contains_key(&full_path) {
+    if types.contains_key(&scoped) {
+        return scoped;
+    }
+    if types.contains_key(&full_path) {
         return full_path;
     }
-    scoped
+    resolved_path
 }
 
 
@@ -477,6 +624,7 @@ pub(crate) fn attach_impl<'a>(
     functions: &mut Vec<FnModel<'a>>,
     im: &'a ItemImpl,
     scope: &str,
+    imports: &TypeImports,
     ignore_tests: bool,
 ) {
     let ty_name = type_name_from_path(&im.self_ty);
@@ -485,7 +633,7 @@ pub(crate) fn attach_impl<'a>(
     if ty_name.is_empty() || (ignore_tests && is_test_module(&im.attrs)) {
         return;
     }
-    let key = impl_type_key(types, im, scope);
+    let key = impl_type_key(types, im, scope, imports);
     types.entry(key.clone()).or_insert_with(|| TypeModel {
         key: key.clone(),
         name: ty_name.clone(),
