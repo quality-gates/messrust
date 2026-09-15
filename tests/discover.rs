@@ -36,6 +36,10 @@ fn fn_with_n_params(n: usize) -> String {
     format!("fn entry_point({}) {{}}\n", params.join(", "))
 }
 
+fn unused_local_fixture() -> &'static str {
+    "fn main() {\n    let unused_thing = 1;\n}\n"
+}
+
 fn reported_basenames(stdout: &str) -> Vec<String> {
     let report: serde_json::Value = serde_json::from_str(stdout).unwrap();
     let mut names: Vec<String> = report["files"]
@@ -191,43 +195,104 @@ fn ignore_tests_on_direct_file_path_skips_conventional_test_names() {
     for name in cases {
         let path = write_file(dir.path(), name, &fn_with_n_params(11));
         let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
-        assert_eq!(code, EXIT_VIOLATION, "without ignore-tests name={name} stderr={err:?}");
+        assert_eq!(
+            code, EXIT_VIOLATION,
+            "without ignore-tests name={name} stderr={err:?}"
+        );
         assert_eq!(
             reported_basenames(&out),
             vec![name.to_string()],
             "without ignore-tests name={name}"
         );
 
-        let (code, out, err) = run_cli(&[
-            path.to_str().unwrap(),
-            "json",
-            "codesize",
-            "--ignore-tests",
-        ]);
-        assert_eq!(code, EXIT_SUCCESS, "with ignore-tests name={name} stderr={err:?}");
+        let (code, out, err) =
+            run_cli(&[path.to_str().unwrap(), "json", "codesize", "--ignore-tests"]);
+        assert_eq!(
+            code, EXIT_ERROR,
+            "with ignore-tests name={name} stderr={err:?}"
+        );
         assert!(
-            reported_basenames(&out).is_empty(),
-            "with ignore-tests name={name} stdout={out}"
+            out.is_empty(),
+            "with ignore-tests name={name} stdout={out:?}"
+        );
+        assert!(
+            err.contains("no source files to scan"),
+            "with ignore-tests name={name} stderr={err:?}"
         );
     }
 }
 
 #[test]
-fn ignore_tests_on_direct_path_skips_file_under_tests_directory() {
+fn ignore_tests_on_direct_file_path_ignores_ancestor_test_directory() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "tests/integration.rs", &fn_with_n_params(11));
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize"]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert_eq!(reported_basenames(&out), vec!["integration.rs".to_string()]);
 
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "json", "codesize", "--ignore-tests"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_eq!(reported_basenames(&out), vec!["integration.rs".to_string()]);
+}
+
+#[test]
+fn ignore_tests_scans_explicit_relative_root_below_tests_ancestor() {
+    let dir = TempDir::new_in("target").unwrap();
+    let root = dir.path().join("tests/project/src");
+    write_file(&root, "main.rs", unused_local_fixture());
+    let cwd = std::env::current_dir().unwrap();
+    let relative_root = root.strip_prefix(cwd).unwrap();
+
     let (code, out, err) = run_cli(&[
-        path.to_str().unwrap(),
-        "json",
-        "codesize",
+        relative_root.to_str().unwrap(),
+        "text",
+        "unusedcode",
         "--ignore-tests",
     ]);
-    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}");
-    assert!(reported_basenames(&out).is_empty(), "stdout={out}");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("UnusedLocalVariable"), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn ignore_tests_scans_explicit_absolute_root_below_tests_ancestor() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("tests/project/src");
+    write_file(&root, "main.rs", unused_local_fixture());
+
+    let (code, out, err) = run_cli(&[
+        root.to_str().unwrap(),
+        "text",
+        "unusedcode",
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("UnusedLocalVariable"), "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn ignore_tests_reports_when_no_scannable_files_remain() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("src");
+    write_file(&root, "tests/integration.rs", &fn_with_n_params(11));
+
+    let (code, out, err) = run_cli(&[root.to_str().unwrap(), "text", "codesize", "--ignore-tests"]);
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("no source files to scan"), "stderr={err:?}");
+}
+
+#[test]
+fn ignore_tests_keeps_skipping_an_explicit_test_directory_root() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("tests");
+    write_file(&root, "integration.rs", &fn_with_n_params(11));
+
+    let (code, out, err) = run_cli(&[root.to_str().unwrap(), "text", "codesize", "--ignore-tests"]);
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("no source files to scan"), "stderr={err:?}");
 }
 
 #[test]
@@ -326,4 +391,3 @@ fn exclude_filters_direct_file_paths() {
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert_eq!(reported_basenames(&out), vec!["keep.rs"]);
 }
-
