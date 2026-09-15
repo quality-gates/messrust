@@ -106,6 +106,8 @@ the report.
 - Discovery skips `.git`, `target`, and `node_modules`.
 - Tests are included unless `--ignore-tests` is set, so excluding test quality
   is an explicit choice.
+- With `--ignore-tests`, a run with no source files to scan reports a discovery
+  error instead of returning a clean result.
 - With `--ignore-tests`, a method that only compiles with `test` on does not
   count toward the metrics of its type. A type then has the same code size,
   complexity, coupling, and cohesion as it has in a production build.

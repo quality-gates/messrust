@@ -15,8 +15,8 @@ pub fn discover(paths: &[String], opts: &DiscoverOptions) -> Result<Vec<PathBuf>
     let mut seen = std::collections::HashSet::new();
 
     for raw in paths {
-        let path = PathBuf::from(raw);
-        discover_path(&path, opts, &mut out, &mut seen)?;
+        let root = PathBuf::from(raw);
+        discover_path(&root, &root, opts, &mut out, &mut seen)?;
     }
 
     out.sort();
@@ -25,13 +25,14 @@ pub fn discover(paths: &[String], opts: &DiscoverOptions) -> Result<Vec<PathBuf>
 
 fn discover_path(
     path: &Path,
+    root: &Path,
     opts: &DiscoverOptions,
     out: &mut Vec<PathBuf>,
     seen: &mut std::collections::HashSet<PathBuf>,
 ) -> Result<(), String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if meta.is_file() {
-        if (!opts.ignore_tests || !is_test_path(path)) && !is_excluded(path, &opts.exclude) {
+        if (!opts.ignore_tests || !is_test_path(path, root)) && !is_excluded(path, &opts.exclude) {
             push_unique(out, seen, path.to_path_buf());
         }
         return Ok(());
@@ -39,11 +40,20 @@ fn discover_path(
     if !meta.is_dir() {
         return Err(format!("{}: not a file or directory", path.display()));
     }
-    discover_dir(path, opts, out, seen)
+    if opts.ignore_tests
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_test_dir)
+    {
+        return Ok(());
+    }
+    discover_dir(path, root, opts, out, seen)
 }
 
 fn discover_dir(
     path: &Path,
+    root: &Path,
     opts: &DiscoverOptions,
     out: &mut Vec<PathBuf>,
     seen: &mut std::collections::HashSet<PathBuf>,
@@ -56,7 +66,7 @@ fn discover_dir(
         let candidate = entry.path();
         if entry.file_type().is_file()
             && matches_suffix(candidate, &opts.suffixes)
-            && (!opts.ignore_tests || !is_test_path(candidate))
+            && (!opts.ignore_tests || !is_test_path(candidate, root))
             && !is_excluded(candidate, &opts.exclude)
         {
             push_unique(out, seen, candidate.to_path_buf());
@@ -103,11 +113,13 @@ fn is_test_dir(name: &str) -> bool {
     matches!(name, "test" | "tests" | "__tests__")
 }
 
-fn is_test_path(path: &Path) -> bool {
+fn is_test_path(path: &Path, root: &Path) -> bool {
     is_test_file(path)
-        || path
-            .components()
-            .any(|component| component.as_os_str().to_str().is_some_and(is_test_dir))
+        || path.strip_prefix(root).is_ok_and(|relative| {
+            relative
+                .components()
+                .any(|component| component.as_os_str().to_str().is_some_and(is_test_dir))
+        })
 }
 
 fn is_excluded(path: &Path, exclude: &[String]) -> bool {

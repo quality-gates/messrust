@@ -332,6 +332,12 @@ fn prepare_analysis(
         ignore_tests: opt.input.ignore_tests,
     };
     let files = discover(&opt.input.paths, &discover_opts)?;
+    if opt.input.ignore_tests && files.is_empty() {
+        return Err(format!(
+            "no source files to scan in {}",
+            opt.input.paths.join(", ")
+        ));
+    }
     Ok((files, rules))
 }
 
