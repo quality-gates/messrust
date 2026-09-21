@@ -111,6 +111,9 @@ the report.
 - With `--ignore-tests`, a method that only compiles with `test` on does not
   count toward the metrics of its type. A type then has the same code size,
   complexity, coupling, and cohesion as it has in a production build.
+- With `--ignore-tests`, the rules do not see `#[cfg(test)]` modules. An
+  `impl` block in a test module does not add to a production type. A read,
+  call, or write in a test module still counts as a use of production code.
 - A malformed or unreadable file becomes a processing error. Other valid files
   still analyze.
 

@@ -283,15 +283,23 @@ pub(crate) struct StaticMutSite {
 
 
 impl<'a> FileModel<'a> {
-    /// Builds the model of one file. With `ignore_tests` set, an `impl`
-    /// block or a method that only compiles with `test` on does not enter
-    /// the model, so no type metric counts it.
-    pub(crate) fn from_file(file: &'a syn::File, src: &'a str, ignore_tests: bool) -> Self {
+    /// Builds the model of one file. With `production` set (the file without
+    /// its `#[cfg(test)]` modules), items that rules report come only from
+    /// `production`, and an `impl` block or a method that only compiles with
+    /// `test` on does not enter the model. Reads, calls, and writes still come
+    /// from the full `file`, so a use in test code keeps its target used.
+    pub(crate) fn from_file(
+        file: &'a syn::File,
+        production: Option<&'a syn::File>,
+        src: &'a str,
+    ) -> Self {
+        let ignore_tests = production.is_some();
+        let items = production.unwrap_or(file);
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
         let mut type_imports = TypeImports::default();
         collect_items(
-            &file.items,
+            &items.items,
             "",
             &mut types,
             &mut functions,
@@ -315,16 +323,20 @@ impl<'a> FileModel<'a> {
             variables: Vec::new(),
             constants: Vec::new(),
         };
-        binder.visit_file(file);
+        binder.visit_file(items);
 
-        let mut usage = UseDefCollector::new();
-        usage.visit_file(file);
+        let usage = use_def_model(file, production);
 
         let mut dup = DuplicateKeyCollector::default();
-        dup.visit_file(file);
+        dup.visit_file(items);
 
         let mut statics = StaticMutCollector::default();
         statics.visit_file(file);
+        if let Some(production) = production {
+            let mut production_statics = StaticMutCollector::default();
+            production_statics.visit_file(production);
+            statics.static_muts = production_statics.static_muts;
+        }
 
         let types: Vec<_> = types.into_values().collect();
         Self {
@@ -338,13 +350,31 @@ impl<'a> FileModel<'a> {
             types,
             variables: binder.variables,
             constants: binder.constants,
-            usage: usage.into_model(),
+            usage,
             duplicate_struct_keys: dup.keys,
             static_muts: statics.static_muts,
             mutated_statics: statics.mutated,
         }
     }
 
+}
+
+/// Collects the declarations from `production` when it is set, and the reads
+/// and calls from the full `file`.
+fn use_def_model(file: &syn::File, production: Option<&syn::File>) -> UseDefModel {
+    let mut usage = UseDefCollector::new();
+    usage.visit_file(file);
+    let mut model = usage.into_model();
+    if let Some(production) = production {
+        let mut declarations = UseDefCollector::new();
+        declarations.visit_file(production);
+        let declarations = declarations.into_model();
+        model.locals = declarations.locals;
+        model.params = declarations.params;
+        model.private_fields = declarations.private_fields;
+        model.private_methods = declarations.private_methods;
+    }
+    model
 }
 
 pub(crate) use self::build::is_builtin_type;
@@ -365,7 +395,7 @@ mod tests {
             ));
         }
         let file = syn::parse_file(&source).expect("parse generated source");
-        let model = FileModel::from_file(&file, &source, false);
+        let model = FileModel::from_file(&file, None, &source);
         METRIC_PARENT_LOOKUPS.with(|lookups| lookups.set(0));
         METRIC_FUNCTION_VISITS.with(|visits| visits.set(0));
 

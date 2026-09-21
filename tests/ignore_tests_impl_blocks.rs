@@ -5,6 +5,9 @@
 //! `--ignore-tests` is set. Each case compares three runs of the real CLI:
 //! the file with the test-only code and the flag, the same file with the
 //! test-only code deleted, and the file with the test-only code and no flag.
+//!
+//! A `#[cfg(test)]` module leaves the model before the rules run (#172). Its
+//! reads, calls, and writes still count as uses of production code.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -329,8 +332,8 @@ fn cfg_test_module_and_test_paths_keep_their_behaviour() {
         &[("maxmethods", "2"), ("ignorepattern", "")],
     );
     let xml = xml.to_str().unwrap();
-    // A type declared and filled inside a #[cfg(test)] module keeps dropping
-    // through the finding filter, not through the model.
+    // A type declared and filled inside a #[cfg(test)] module does not enter
+    // the model.
     let path = write_file(
         dir.path(),
         "with_mod.rs",
@@ -342,4 +345,110 @@ fn cfg_test_module_and_test_paths_keep_their_behaviour() {
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml]);
     assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
     assert!(out.contains("TooManyMethods"), "stdout={out:?}");
+}
+
+#[test]
+fn cfg_test_module_impl_of_production_type_does_not_count() {
+    let dir = TempDir::new().unwrap();
+    let xml = ruleset(
+        dir.path(),
+        "tmm",
+        "codesize/TooManyMethods",
+        &[("maxmethods", "2"), ("ignorepattern", "")],
+    );
+    // The test module adds methods to a production type. The finding line is
+    // the production declaration, so a filter on module lines cannot drop it.
+    let result = outcomes(
+        dir.path(),
+        "struct S;\nimpl S {\n    fn m0(&self) {}\n    fn m1(&self) {}\n}\n",
+        "#[cfg(test)]\nmod tests {\n    impl super::S {\n        fn t0(&self) {}\n    }\n}\n",
+        &xml,
+    );
+    assert_test_impl_ignored(&result, "TooManyMethods");
+    assert!(
+        result.without_flag.1.contains("has 3 non-getter"),
+        "no flag must still count the test module method: stdout={:?}",
+        result.without_flag.1
+    );
+}
+
+#[test]
+fn cfg_test_module_use_keeps_production_code_used() {
+    let dir = TempDir::new().unwrap();
+    let xml = write_file(
+        dir.path(),
+        "used.xml",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n\
+         <ruleset name=\"used\">\n  \
+         <rule ref=\"unusedcode/UnusedPrivateMethod\"/>\n  \
+         <rule ref=\"unusedcode/UnusedPrivateField\"/>\n\
+         </ruleset>\n",
+    );
+    // Only the test module reads the field and calls the method. The test
+    // module leaves the model, but its uses must still count.
+    let path = write_file(
+        dir.path(),
+        "used.rs",
+        "pub struct S {\n    hidden: i32,\n}\nimpl S {\n    fn helper(&self) {}\n}\n\
+         #[cfg(test)]\nmod tests {\n    fn check(s: &super::S) {\n        s.helper();\n        let _ = s.hidden;\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+}
+
+#[test]
+fn cfg_test_module_write_keeps_static_mut_mutated() {
+    let dir = TempDir::new().unwrap();
+    let xml = ruleset(
+        dir.path(),
+        "global",
+        "design/GlobalVariable",
+        &[("report-immutable", "false")],
+    );
+    // Only the test module writes the static. The production static stays a
+    // mutated global, so the finding stays.
+    let path = write_file(
+        dir.path(),
+        "global.rs",
+        "static mut COUNTER: i32 = 0;\n\
+         #[cfg(test)]\nmod tests {\n    fn bump() {\n        unsafe { super::COUNTER += 1; }\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        xml.to_str().unwrap(),
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("global.rs:1"), "stdout={out:?}");
+    assert!(out.contains("GlobalVariable"), "stdout={out:?}");
+}
+
+#[test]
+fn nested_cfg_test_module_leaves_the_model() {
+    let dir = TempDir::new().unwrap();
+    let xml = ruleset(
+        dir.path(),
+        "tmm",
+        "codesize/TooManyMethods",
+        &[("maxmethods", "2"), ("ignorepattern", "")],
+    );
+    let xml = xml.to_str().unwrap();
+    let path = write_file(
+        dir.path(),
+        "nested.rs",
+        "mod outer {\n    #[cfg(test)]\n    mod tests {\n        struct S;\n        impl S {\n            fn m0(&self) {}\n            fn m1(&self) {}\n            fn m2(&self) {}\n        }\n    }\n}\n",
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml, "--ignore-tests"]);
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("nested.rs:4"), "stdout={out:?}");
 }
