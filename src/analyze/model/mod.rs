@@ -265,6 +265,20 @@ pub(crate) struct UseDefModel {
     pub(crate) method_calls: HashSet<String>,
 }
 
+impl UseDefModel {
+    /// Keeps the reads and calls of `self` and takes all declarations from
+    /// `other`.
+    fn with_declarations_from(self, other: UseDefModel) -> Self {
+        Self {
+            locals: other.locals,
+            params: other.params,
+            private_fields: other.private_fields,
+            private_methods: other.private_methods,
+            ..self
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 
 
@@ -294,12 +308,12 @@ impl<'a> FileModel<'a> {
         src: &'a str,
     ) -> Self {
         let ignore_tests = production.is_some();
-        let items = production.unwrap_or(file);
+        let declared = production.unwrap_or(file);
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
         let mut type_imports = TypeImports::default();
         collect_items(
-            &items.items,
+            &declared.items,
             "",
             &mut types,
             &mut functions,
@@ -323,12 +337,12 @@ impl<'a> FileModel<'a> {
             variables: Vec::new(),
             constants: Vec::new(),
         };
-        binder.visit_file(items);
+        binder.visit_file(declared);
 
         let usage = use_def_model(file, production);
 
         let mut dup = DuplicateKeyCollector::default();
-        dup.visit_file(items);
+        dup.visit_file(declared);
 
         let mut statics = StaticMutCollector::default();
         statics.visit_file(file);
@@ -362,19 +376,17 @@ impl<'a> FileModel<'a> {
 /// Collects the declarations from `production` when it is set, and the reads
 /// and calls from the full `file`.
 fn use_def_model(file: &syn::File, production: Option<&syn::File>) -> UseDefModel {
+    let model = collect_use_def(file);
+    match production {
+        Some(production) => model.with_declarations_from(collect_use_def(production)),
+        None => model,
+    }
+}
+
+fn collect_use_def(file: &syn::File) -> UseDefModel {
     let mut usage = UseDefCollector::new();
     usage.visit_file(file);
-    let mut model = usage.into_model();
-    if let Some(production) = production {
-        let mut declarations = UseDefCollector::new();
-        declarations.visit_file(production);
-        let declarations = declarations.into_model();
-        model.locals = declarations.locals;
-        model.params = declarations.params;
-        model.private_fields = declarations.private_fields;
-        model.private_methods = declarations.private_methods;
-    }
-    model
+    usage.into_model()
 }
 
 pub(crate) use self::build::is_builtin_type;
