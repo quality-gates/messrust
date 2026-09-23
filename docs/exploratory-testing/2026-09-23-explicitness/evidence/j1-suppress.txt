@@ -1,0 +1,6 @@
+/et/fixtures/suppress.rs:12  ImplicitOutput  The function 'c' has an implicit output: it uses 'println!'.
+[exit=2]
+/et/fixtures/suppress.rs:3   ImplicitOutput [suppressed]  The function 'a' has an implicit output: it uses 'println!'.
+/et/fixtures/suppress.rs:7   ImplicitOutput [suppressed]  The function 'b' has an implicit output: it uses 'println!'.
+/et/fixtures/suppress.rs:12  ImplicitOutput               The function 'c' has an implicit output: it uses 'println!'.
+[exit=2]

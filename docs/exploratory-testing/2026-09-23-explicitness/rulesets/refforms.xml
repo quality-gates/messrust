@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="refs">
+  <rule ref="rulesets/explicitness.xml/ImplicitOutput">
+    <properties><property name="include-self" value="true"/></properties>
+  </rule>
+</ruleset>

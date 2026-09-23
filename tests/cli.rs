@@ -1005,6 +1005,7 @@ fn component_ruleset_names_load_without_error() {
         "cleancode",
         "design",
         "controversial",
+        "explicitness",
     ] {
         let (code, _out, err) = run_cli(&[path.to_str().unwrap(), "text", name]);
         assert_eq!(code, EXIT_SUCCESS, "ruleset={name} stderr={err:?}");

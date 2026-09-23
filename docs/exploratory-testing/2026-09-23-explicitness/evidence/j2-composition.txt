@@ -1,0 +1,28 @@
+== explicitness then strict.xml (later overrides: expect self findings)
+7
+== strict.xml then explicitness (later overrides: expect 0 self findings)
+7
+== rulesets/explicitness.xml/ImplicitOutput ref
+/et/fixtures/strict_methods.rs:18  ImplicitOutput  The method 'Counter::tick' has an implicit output: it changes the state of 'self'.
+/et/fixtures/strict_methods.rs:23  ImplicitOutput  The method 'Counter::reset' has an implicit output: it changes the state of 'self'.
+[exit=2]
+== explicitness.xml name
+/et/fixtures/c1_lazylock_mutex.rs:8  ImplicitOutput  The function 'audit_plain' has an implicit output: it writes the global 'PLAIN'.
+[exit=2]
+== exclude ImplicitInput
+0
+== rust,explicitness --only ImplicitOutput
+   1 
+   4 ImplicitOutput
+== --disable ImplicitOutput
+   1 
+   4 ImplicitInput
+== rust alone has no explicitness rules
+0
+[exit=0]
+== max-a.xml,codesize
+/et/fixtures/three_params.rs:1  ExcessiveParameterList  The function three has 3 parameters. Consider reducing the number of parameters to less than 2.
+[exit=2]
+== codesize,max-a.xml
+/et/fixtures/three_params.rs:1  ExcessiveParameterList  The function three has 3 parameters. Consider reducing the number of parameters to less than 2.
+[exit=2]

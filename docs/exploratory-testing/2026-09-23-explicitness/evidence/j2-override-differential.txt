@@ -1,0 +1,24 @@
+branch max-a.xml,codesize run1: reducing the number of parameters to less than 2.
+branch max-a.xml,codesize run2: reducing the number of parameters to less than 2.
+branch max-b.xml,codesize run1: reducing the number of parameters to less than 2.
+branch max-b.xml,codesize run2: reducing the number of parameters to less than 2.
+branch max-b.xml,rust run1: reducing the number of parameters to less than 2.
+branch max-b.xml,rust run2: reducing the number of parameters to less than 2.
+branch codesize,max-a.xml run1: reducing the number of parameters to less than 2.
+branch codesize,max-a.xml run2: reducing the number of parameters to less than 2.
+main max-a.xml,codesize run1: reducing the number of parameters to less than 2.
+main max-a.xml,codesize run2: reducing the number of parameters to less than 2.
+main max-b.xml,codesize run1: reducing the number of parameters to less than 2.
+main max-b.xml,codesize run2: reducing the number of parameters to less than 2.
+main max-b.xml,rust run1: reducing the number of parameters to less than 2.
+main max-b.xml,rust run2: reducing the number of parameters to less than 2.
+main codesize,max-a.xml run1: reducing the number of parameters to less than 2.
+main codesize,max-a.xml run2: reducing the number of parameters to less than 2.
+
+Narrowing (branch build). max20.xml sets LongVariable maximum=20 with a bare "LongVariable" ref.
+== longvar max20.xml,rust    -> no LongVariable finding (rust.xml sets maximum=35 explicitly)
+== longvar max20.xml,naming  -> LongVariable ... Keep variable name length under 20.
+== three_params max-b.xml,rust                                  -> less than 2
+== three_params max-b.xml,codesize                              -> less than 2
+== three_params max-b.xml,codesize --only ExcessiveParameterList -> less than 2
+== three_params rust                                            -> no finding (default minimum=10)

@@ -1,0 +1,9 @@
+/et/fixtures/app/service.rs:31  ImplicitInput   The function 'api_url' has an implicit input: it calls 'env::var'.
+/et/fixtures/app/service.rs:36  ImplicitInput   The function 'elapsed_ms' has an implicit input: it calls 'Instant::now'.
+/et/fixtures/app/service.rs:41  ImplicitInput   The function 'setting' has an implicit input: it reads the global 'CONFIG'.
+/et/fixtures/app/service.rs:46  ImplicitOutput  The function 'handle' has an implicit output: it writes the global 'REQUESTS'.
+/et/fixtures/app/service.rs:57  ImplicitInput   The function 'remember' has an implicit input: it reads the global 'SCRATCH'.
+/et/fixtures/app/service.rs:62  ImplicitOutput  The function 'warn_user' has an implicit output: it calls 'io::stderr'.
+/et/fixtures/app/service.rs:66  ImplicitOutput  The function 'add_item' has an implicit output: it writes through the '&mut' parameter 'order'.
+/et/fixtures/app/service.rs:73  ImplicitOutput  The function 'checkout' has an implicit output: it uses 'println!'.
+[exit=2]

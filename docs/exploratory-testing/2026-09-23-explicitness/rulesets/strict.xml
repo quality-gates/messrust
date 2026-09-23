@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="strict explicitness">
+  <rule ref="explicitness/ImplicitInput">
+    <properties><property name="include-self" value="true"/></properties>
+  </rule>
+  <rule ref="explicitness/ImplicitOutput">
+    <properties><property name="include-self" value="true"/></properties>
+  </rule>
+</ruleset>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="v">
+  <rule ref="ImplicitInput"><properties><property name="include-self" value="yes"/></properties></rule>
+</ruleset>
