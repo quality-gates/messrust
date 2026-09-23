@@ -809,14 +809,36 @@ fn boundary_summary(child: ExpansionResult, rule: &XmlRule, kind: BoundaryKind) 
     })
 }
 
-fn replace_loaded_rule(out: &mut [LoadedRule], updated: LoadedRule) {
+fn replace_loaded_rule(out: &mut Vec<LoadedRule>, updated: LoadedRule) {
     if let Some(existing) = out.iter_mut().find(|rule| rule.name == updated.name) {
         *existing = updated;
+    } else {
+        out.push(updated);
+    }
+}
+
+fn update_loaded_rule(
+    out: &mut Vec<LoadedRule>,
+    set_name: &str,
+    def: &XmlRule,
+    overrides: Option<&ActiveOverrides>,
+    opts: &LoadOptions,
+    warn: &mut dyn FnMut(String),
+) {
+    match build_rule(set_name, def, overrides, opts, warn) {
+        BuildRuleResult::Loaded(updated) => {
+            replace_loaded_rule(out, updated);
+        }
+        BuildRuleResult::Filtered => {
+            out.retain(|rule| rule.name != def.name);
+        }
+        BuildRuleResult::Unsupported => {}
     }
 }
 
 fn reference_forces_reexpansion(rule: &XmlRule, target_rule_name: &str) -> bool {
-    !target_rule_name.is_empty() && (!rule.properties.is_empty() || rule.priority.is_some())
+    let _ = rule;
+    !target_rule_name.is_empty()
 }
 
 /// Cached expansion result reusable for this reference boundary. A
@@ -1041,6 +1063,7 @@ impl<'a> RulesetLoader<'a> {
     fn load_one(&mut self, ident: &str, out: &mut Vec<LoadedRule>) -> Result<(), String> {
         let (source_id, display_name, source) = self.source(ident)?;
         let set_name = ruleset_source_name(&source, &display_name);
+        self.force_expand = Some(expansion_key(&source_id, ""));
         self.expand_source(out, &source_id, &source, &set_name, "")
             .map(|_| ())
     }
@@ -1244,7 +1267,7 @@ impl<'a> RulesetLoader<'a> {
         }
         self.resolved_rule_count += 1;
         Ok(self
-            .emit_rule(out, source_name, source_rule, true)
+            .emit_rule(out, source_name, source_rule, true, true)
             .map_or_else(empty_summary, |rule| rules_summary(vec![rule])))
     }
 
@@ -1255,6 +1278,7 @@ impl<'a> RulesetLoader<'a> {
         source_name: &str,
         base: Option<&Path>,
     ) -> Result<ExpansionResult, String> {
+        let initial_loaded = self.loaded.names.clone();
         let mut children = Vec::new();
         let mut local_rules = Vec::new();
         for source_rule in &source.rules {
@@ -1273,7 +1297,10 @@ impl<'a> RulesetLoader<'a> {
                 children.push(self.add_ref_with_boundary(out, source_rule, false, base)?);
             } else if !source_rule.class.is_empty() {
                 self.resolved_rule_count += 1;
-                if let Some(rule) = self.emit_rule(out, source_name, source_rule, false) {
+                let is_earlier_loaded = initial_loaded.contains(&source_rule.name);
+                if let Some(rule) =
+                    self.emit_rule(out, source_name, source_rule, false, is_earlier_loaded)
+                {
                     local_rules.push(rule);
                 }
             }
@@ -1288,18 +1315,15 @@ impl<'a> RulesetLoader<'a> {
         set_name: &str,
         def: &XmlRule,
         use_overrides: bool,
+        is_earlier_loaded: bool,
     ) -> Option<BlockedRule> {
+        let overrides = use_overrides.then_some(&self.overrides);
         if self.loaded.names.contains(&def.name) {
-            if use_overrides {
-                if let BuildRuleResult::Loaded(updated) =
-                    build_rule(set_name, def, Some(&self.overrides), self.opts, self.warn)
-                {
-                    replace_loaded_rule(out, updated);
-                }
+            if use_overrides || is_earlier_loaded {
+                update_loaded_rule(out, set_name, def, overrides, self.opts, self.warn);
             }
             return None;
         }
-        let overrides = use_overrides.then_some(&self.overrides);
         match build_rule(set_name, def, overrides, self.opts, self.warn) {
             BuildRuleResult::Loaded(rule) => {
                 self.loaded.names.insert(rule.name.clone());
@@ -2143,6 +2167,130 @@ mod tests {
 
         assert_eq!(maximum_of(&later_custom).as_deref(), Some("20"));
         assert_eq!(maximum_of(&later_builtin).as_deref(), Some("35"));
+    }
+
+    #[test]
+    fn later_ruleset_reference_without_properties_restores_default_properties() {
+        let dir = TempDir::new().expect("temporary directory");
+        let custom = dir.path().join("min2.xml");
+        fs::write(
+            &custom,
+            "<ruleset name=\"t\">\
+             <rule ref=\"ExcessiveParameterList\">\
+             <properties><property name=\"minimum\" value=\"2\"/></properties>\
+             </rule></ruleset>",
+        )
+        .expect("write custom ruleset");
+        let reset_named = dir.path().join("reset_named.xml");
+        fs::write(
+            &reset_named,
+            "<ruleset name=\"r\">\
+             <rule ref=\"codesize/ExcessiveParameterList\"/>\
+             </ruleset>",
+        )
+        .expect("write reset ruleset");
+        let reset_bare = dir.path().join("reset_bare.xml");
+        fs::write(
+            &reset_bare,
+            "<ruleset name=\"r2\">\
+             <rule ref=\"ExcessiveParameterList\"/>\
+             </ruleset>",
+        )
+        .expect("write reset bare ruleset");
+
+        let custom_spec = custom.display().to_string();
+        let reset_named_spec = reset_named.display().to_string();
+        let reset_bare_spec = reset_bare.display().to_string();
+        let mut warn = |_: String| {};
+
+        let minimum_of = |rules: &[LoadedRule]| {
+            rules
+                .iter()
+                .find(|rule| rule.name == "ExcessiveParameterList")
+                .and_then(|rule| rule.properties.get("minimum").cloned())
+        };
+
+        let later_whole_builtin = load_and_filter(
+            &[custom_spec.clone(), "codesize".to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load custom,codesize");
+        assert_eq!(minimum_of(&later_whole_builtin).as_deref(), Some("10"));
+
+        let later_rust = load_and_filter(
+            &[custom_spec.clone(), "rust".to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load custom,rust");
+        assert_eq!(minimum_of(&later_rust).as_deref(), Some("10"));
+
+        let later_named = load_and_filter(
+            &[custom_spec.clone(), reset_named_spec],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load custom,reset_named");
+        assert_eq!(minimum_of(&later_named).as_deref(), Some("10"));
+
+        let later_bare = load_and_filter(
+            &[custom_spec, reset_bare_spec],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load custom,reset_bare");
+        assert_eq!(minimum_of(&later_bare).as_deref(), Some("10"));
+    }
+
+    #[test]
+    fn later_partial_property_override_reverts_unspecified_properties_to_defaults() {
+        let dir = TempDir::new().expect("temporary directory");
+        let custom1 = dir.path().join("c1.xml");
+        fs::write(
+            &custom1,
+            "<ruleset name=\"c1\">\
+             <rule ref=\"CyclomaticComplexity\">\
+             <properties>\
+               <property name=\"reportLevel\" value=\"5\"/>\
+               <property name=\"showClassesComplexity\" value=\"false\"/>\
+             </properties>\
+             </rule></ruleset>",
+        )
+        .expect("write c1");
+        let custom2 = dir.path().join("c2.xml");
+        fs::write(
+            &custom2,
+            "<ruleset name=\"c2\">\
+             <rule ref=\"CyclomaticComplexity\">\
+             <properties>\
+               <property name=\"reportLevel\" value=\"7\"/>\
+             </properties>\
+             </rule></ruleset>",
+        )
+        .expect("write c2");
+
+        let mut warn = |_: String| {};
+        let rules = load_and_filter(
+            &[custom1.display().to_string(), custom2.display().to_string()],
+            &[],
+            &[],
+            &LoadOptions::default(),
+            &mut warn,
+        )
+        .expect("load c1,c2");
+
+        let rule = rules.iter().find(|r| r.name == "CyclomaticComplexity").unwrap();
+        assert_eq!(rule.properties.get("reportLevel").map(String::as_str), Some("7"));
+        assert_eq!(rule.properties.get("showClassesComplexity").map(String::as_str), Some("true"));
     }
 
     #[test]
