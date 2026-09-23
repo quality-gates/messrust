@@ -49,6 +49,7 @@ and suppression fields. Findings sort by file and source line.
 | `cleancode` | Boolean flags, terminal `else`, static calls, assignment-in-condition, duplicate struct fields. |
 | `design` | Exits, empty error arms, coupling, globals, cohesion, development leftovers. |
 | `controversial` | PascalCase types and snake_case identifiers. |
+| `explicitness` | Implicit inputs and outputs of functions. Opt-in; not part of `rust` or `opinionated`. |
 
 Comma-separated values may mix built-ins and custom XML paths:
 
@@ -64,6 +65,7 @@ What each rule catches, and which ones live in `rust` versus `opinionated`:
 - [Clean code](cleancode.md)
 - [Design](design.md)
 - [Rust style names](controversial.md)
+- [Implicit inputs and outputs](explicitness.md)
 
 ## Options
 

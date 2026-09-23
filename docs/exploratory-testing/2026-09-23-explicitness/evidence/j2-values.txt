@@ -1,0 +1,10 @@
+== include-self=TRUE
+5
+== include-self=1
+5
+== include-self=yes
+5
+== include-self=on
+0
+== include-self=bogus
+0

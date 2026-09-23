@@ -1,0 +1,12 @@
+== run 1
+/et/fixtures/c1_lazylock_mutex.rs:8  ImplicitOutput  The function 'audit_plain' has an implicit output: it writes the global 'PLAIN'.
+[exit=2]
+/et/fixtures/c2_thread_local_with.rs:6  ImplicitInput   The function 'remember' has an implicit input: it reads the global 'SCRATCH'.
+/et/fixtures/c2_thread_local_with.rs:9  ImplicitOutput  The function 'remember_direct' has an implicit output: it writes the global 'SCRATCH'.
+[exit=2]
+== run 2
+/et/fixtures/c1_lazylock_mutex.rs:8  ImplicitOutput  The function 'audit_plain' has an implicit output: it writes the global 'PLAIN'.
+[exit=2]
+/et/fixtures/c2_thread_local_with.rs:6  ImplicitInput   The function 'remember' has an implicit input: it reads the global 'SCRATCH'.
+/et/fixtures/c2_thread_local_with.rs:9  ImplicitOutput  The function 'remember_direct' has an implicit output: it writes the global 'SCRATCH'.
+[exit=2]

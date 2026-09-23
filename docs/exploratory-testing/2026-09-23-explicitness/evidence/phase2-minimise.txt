@@ -1,0 +1,27 @@
+== fixtures/min/c1_a_lazy_mutex.rs
+[exit=0]
+== fixtures/min/c1_b_mutex.rs
+/et/fixtures/min/c1_b_mutex.rs:2  ImplicitOutput  The function 'f' has an implicit output: it writes the global 'A'.
+[exit=2]
+== fixtures/min/c1_c_option_mutex.rs
+[exit=0]
+== fixtures/min/c1_d_lazy_only.rs
+[exit=0]
+== fixtures/min/c1_e_path_mutex.rs
+/et/fixtures/min/c1_e_path_mutex.rs:2  ImplicitOutput  The function 'f' has an implicit output: it writes the global 'A'.
+[exit=2]
+== fixtures/min/c1_f_array_mutex.rs
+/et/fixtures/min/c1_f_array_mutex.rs:2  ImplicitOutput  The function 'f' has an implicit output: it writes the global 'A'.
+[exit=2]
+== fixtures/min/c2_a_with_borrow_mut.rs
+/et/fixtures/min/c2_a_with_borrow_mut.rs:2  ImplicitInput  The function 'f' has an implicit input: it reads the global 'K'.
+[exit=2]
+== fixtures/min/c2_b_with_set.rs
+/et/fixtures/min/c2_b_with_set.rs:2  ImplicitInput  The function 'f' has an implicit input: it reads the global 'K'.
+[exit=2]
+== fixtures/min/c2_c_with_get.rs
+/et/fixtures/min/c2_c_with_get.rs:2  ImplicitInput  The function 'f' has an implicit input: it reads the global 'K'.
+[exit=2]
+== fixtures/min/c2_d_set_direct.rs
+/et/fixtures/min/c2_d_set_direct.rs:2  ImplicitOutput  The function 'f' has an implicit output: it writes the global 'K'.
+[exit=2]

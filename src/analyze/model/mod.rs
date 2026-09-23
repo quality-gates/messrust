@@ -22,11 +22,12 @@ use crate::metrics::{effective_line_count, effective_line_prefix};
 use super::helpers::is_public;
 
 use self::build::{
-    collect_items, BindingCollector, DuplicateKeyCollector, StaticMutCollector, TypeImports,
+    collect_items, BindingCollector, DuplicateKeyCollector, SharedStaticCollector,
+    StaticMutCollector, TypeImports,
 };
 use self::use_def::UseDefCollector;
 
-pub(crate) use self::use_def::path_single_ident;
+pub(crate) use self::use_def::{collect_format_captures, path_single_ident};
 
 pub(crate) fn count_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>) -> usize {
     inputs
@@ -159,6 +160,8 @@ pub(crate) struct FnModel<'a> {
     pub(crate) returns_bool: bool,
     pub(crate) dep_types: Vec<String>,
     pub(crate) counts_for_type_metrics: bool,
+    pub(crate) signature: &'a syn::Signature,
+    pub(crate) in_trait_impl: bool,
 }
 
 
@@ -250,6 +253,7 @@ pub(crate) struct FileModel<'a> {
     pub(crate) duplicate_struct_keys: Vec<DuplicateKey>,
     pub(crate) static_muts: Vec<StaticMutSite>,
     pub(crate) mutated_statics: HashSet<String>,
+    pub(crate) shared_statics: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -352,6 +356,9 @@ impl<'a> FileModel<'a> {
             statics.static_muts = production_statics.static_muts;
         }
 
+        let mut shared = SharedStaticCollector::default();
+        shared.visit_file(file);
+
         let types: Vec<_> = types.into_values().collect();
         Self {
             effective_lines: EffectiveLines {
@@ -368,6 +375,7 @@ impl<'a> FileModel<'a> {
             duplicate_struct_keys: dup.keys,
             static_muts: statics.static_muts,
             mutated_statics: statics.mutated,
+            shared_statics: shared.names,
         }
     }
 

@@ -36,6 +36,7 @@ What each rule checks:
 - [Control flow and direct dependencies](docs/cleancode.md)
 - [Design, errors, and cohesion](docs/design.md)
 - [Rust style names](docs/controversial.md)
+- [Implicit inputs and outputs](docs/explicitness.md)
 
 ## Install
 

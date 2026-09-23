@@ -1,0 +1,12 @@
+/et/fixtures/edges.rs:13  ImplicitInput   The function 'buffer_ptr' has an implicit input: it reads the global 'BUFFER'.
+/et/fixtures/edges.rs:18  ImplicitInput   The function 'buffer_ptr_macro' has an implicit input: it reads the global 'BUFFER'.
+/et/fixtures/edges.rs:23  ImplicitInput   The function 'enter' has an implicit input: it reads the global 'DEPTH'.
+/et/fixtures/edges.rs:28  ImplicitInput   The function 'load' has an implicit input: it calls 'fs::read_to_string'.
+/et/fixtures/edges.rs:34  ImplicitInput   The function 'read_line' has an implicit input: it calls 'io::stdin'.
+/et/fixtures/edges.rs:40  ImplicitInput   The function 'report' has an implicit input: it reads the global 'READY'.
+/et/fixtures/edges.rs:40  ImplicitOutput  The function 'report' has an implicit output: it uses 'info!'.
+/et/fixtures/edges.rs:46  ImplicitOutput  The function 'shout' has an implicit output: it uses 'eprintln!'.
+/et/fixtures/edges.rs:53  ImplicitOutput  The method 'Wrapper::set' has an implicit output: it writes through the '&mut' parameter 'dst'.
+/et/fixtures/edges.rs:61  ImplicitInput   The function 'slurp' has an implicit input: it calls 'File::open'.
+/et/fixtures/edges.rs:67  ImplicitOutput  The function 'flush' has an implicit output: it calls 'io::stdout'.
+[exit=2]

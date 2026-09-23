@@ -1,5 +1,5 @@
 //! Syntax-only analysis for codesize, naming, unusedcode, cleancode, design,
-//! and controversial rules.
+//! controversial, and explicitness rules.
 
 mod helpers;
 mod kind;
@@ -20,6 +20,7 @@ use self::rules::cleancode::*;
 use self::rules::codesize::*;
 use self::rules::controversial::*;
 use self::rules::design::*;
+use self::rules::explicitness::*;
 use self::rules::naming::*;
 use self::rules::unusedcode::*;
 
@@ -195,6 +196,8 @@ pub(crate) const RULE_HANDLERS: &[RuleHandler] = &[
     apply_camel_case_property_name,
     apply_camel_case_parameter_name,
     apply_camel_case_variable_name,
+    apply_implicit_input,
+    apply_implicit_output,
 ];
 
 

@@ -1,0 +1,9 @@
+/workspace/docs/exploratory-testing/2026-09-23-explicitness/fixtures/min/probe.rs:5  ImplicitInput   The function 'g' has an implicit input: it reads the global 'K'.
+/workspace/docs/exploratory-testing/2026-09-23-explicitness/fixtures/min/probe.rs:5  ImplicitOutput  The function 'g' has an implicit output: it uses 'println!'.
+[exit=2]
+[DEBUG-c1a7] static A names=["Option"]
+[DEBUG-c1a7] static B names=["Mutex"]
+[DEBUG-c2b3] note_write root=Some(("A", 4))
+[DEBUG-c2b3] note_write root=Some(("s", 5))
+[DEBUG-c2b3] note_write root=Some(("A", 4))
+[DEBUG-c2b3] note_write root=Some(("s", 5))

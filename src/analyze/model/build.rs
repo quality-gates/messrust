@@ -512,6 +512,8 @@ pub(crate) fn insert_trait<'a>(
                 returns_bool: returns_bool(&m.sig.output),
                 dep_types: sig_dep_types(&m.sig),
                 counts_for_type_metrics: false,
+                signature: &m.sig,
+                in_trait_impl: false,
             });
         }
     }
@@ -553,6 +555,8 @@ pub(crate) fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
         returns_bool: returns_bool(&f.sig.output),
         dep_types: sig_dep_types(&f.sig),
         counts_for_type_metrics: false,
+        signature: &f.sig,
+        in_trait_impl: false,
     }
 }
 
@@ -615,6 +619,8 @@ fn attach_impl_method<'a>(
         returns_bool: returns_bool(&method.sig.output),
         dep_types: sig_dep_types(&method.sig),
         counts_for_type_metrics: inherent,
+        signature: &method.sig,
+        in_trait_impl: !inherent,
     });
 }
 
@@ -838,5 +844,80 @@ fn collect_mutated_static_place(
             collect_mutated_static_place(&u.expr, scope, mutated)
         }
         _ => {}
+    }
+}
+
+
+/// Collects the names of statics that can hold a different value between
+/// calls: `static mut` items, statics with an interior-mutability type, and
+/// `thread_local!` keys. An immutable static of a plain type acts as a
+/// constant, so it does not enter the set.
+#[derive(Default)]
+pub(crate) struct SharedStaticCollector {
+    pub(crate) names: HashSet<String>,
+}
+
+
+impl<'ast> Visit<'ast> for SharedStaticCollector {
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        let mutable = !matches!(node.mutability, syn::StaticMutability::None);
+        if mutable || has_interior_mutable_type(&node.ty) {
+            self.names.insert(node.ident.to_string());
+        }
+        syn::visit::visit_item_static(self, node);
+    }
+
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        if node.path.segments.last().is_some_and(|segment| segment.ident == "thread_local") {
+            collect_thread_local_keys(node.tokens.clone(), &mut self.names);
+        }
+    }
+}
+
+
+/// True when `ty` or one of its generic arguments is interior-mutable, for
+/// example `LazyLock<Mutex<T>>`.
+fn has_interior_mutable_type(ty: &syn::Type) -> bool {
+    let mut finder = InteriorMutableFinder { found: false };
+    finder.visit_type(ty);
+    finder.found
+}
+
+
+struct InteriorMutableFinder {
+    found: bool,
+}
+
+
+impl<'ast> Visit<'ast> for InteriorMutableFinder {
+    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+        if let Some(segment) = node.path.segments.last() {
+            self.found |= is_interior_mutable(&segment.ident.to_string());
+        }
+        syn::visit::visit_type_path(self, node);
+    }
+}
+
+
+fn is_interior_mutable(type_name: &str) -> bool {
+    type_name.starts_with("Atomic")
+        || matches!(
+            type_name,
+            "Cell" | "RefCell" | "UnsafeCell" | "Mutex" | "RwLock" | "OnceCell" | "OnceLock"
+        )
+}
+
+
+fn collect_thread_local_keys(tokens: proc_macro2::TokenStream, names: &mut HashSet<String>) {
+    let mut after_static = false;
+    for token in tokens {
+        if let proc_macro2::TokenTree::Ident(ident) = token {
+            if after_static {
+                names.insert(ident.to_string());
+            }
+            after_static = ident == "static";
+        } else {
+            after_static = false;
+        }
     }
 }

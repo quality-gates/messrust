@@ -1,0 +1,8 @@
+/et/fixtures/strict_methods.rs:14  ImplicitInput   The method 'Counter::value' has an implicit input: it reads the state of 'self'.
+/et/fixtures/strict_methods.rs:18  ImplicitOutput  The method 'Counter::tick' has an implicit output: it changes the state of 'self'.
+/et/fixtures/strict_methods.rs:19  ImplicitInput   The method 'Counter::tick' has an implicit input: it reads the state of 'self'.
+/et/fixtures/strict_methods.rs:23  ImplicitOutput  The method 'Counter::reset' has an implicit output: it changes the state of 'self'.
+/et/fixtures/strict_methods.rs:29  ImplicitInput   The method 'Counter::scaled' has an implicit input: it reads the state of 'self'.
+/et/fixtures/strict_methods.rs:34  ImplicitInput   The method 'Counter::into_count' has an implicit input: it reads the state of 'self'.
+/et/fixtures/strict_methods.rs:42  ImplicitInput   The method 'Shape::double' has an implicit input: it reads the state of 'self'.
+[exit=2]

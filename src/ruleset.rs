@@ -1626,6 +1626,14 @@ const RULE_KINDS: &[(&str, RuleKind)] = &[
         "PHPMD\\Rule\\Controversial\\CamelCaseVariableName",
         RuleKind::CamelCaseVariableName,
     ),
+    (
+        "Messrust\\Rule\\Explicitness\\ImplicitInput",
+        RuleKind::ImplicitInput,
+    ),
+    (
+        "Messrust\\Rule\\Explicitness\\ImplicitOutput",
+        RuleKind::ImplicitOutput,
+    ),
 ];
 
 fn read_ruleset(ident: &str) -> Result<(String, String), String> {
@@ -1677,22 +1685,24 @@ fn ruleset_display_name(ident: &str) -> String {
         .to_string()
 }
 
+const BUILTIN_RULESETS: &[(&str, &str)] = &[
+    ("codesize", include_str!("../rulesets/codesize.xml")),
+    ("naming", include_str!("../rulesets/naming.xml")),
+    ("unusedcode", include_str!("../rulesets/unusedcode.xml")),
+    ("cleancode", include_str!("../rulesets/cleancode.xml")),
+    ("design", include_str!("../rulesets/design.xml")),
+    ("controversial", include_str!("../rulesets/controversial.xml")),
+    ("explicitness", include_str!("../rulesets/explicitness.xml")),
+    ("rust", include_str!("../rulesets/rust.xml")),
+    ("opinionated", include_str!("../rulesets/opinionated.xml")),
+];
+
 fn builtin_xml(ident: &str) -> Option<(&'static str, &'static str)> {
     let key = normalize_builtin_key(ident)?;
-    match key.as_str() {
-        "codesize" => Some((include_str!("../rulesets/codesize.xml"), "codesize")),
-        "naming" => Some((include_str!("../rulesets/naming.xml"), "naming")),
-        "unusedcode" => Some((include_str!("../rulesets/unusedcode.xml"), "unusedcode")),
-        "cleancode" => Some((include_str!("../rulesets/cleancode.xml"), "cleancode")),
-        "design" => Some((include_str!("../rulesets/design.xml"), "design")),
-        "controversial" => Some((
-            include_str!("../rulesets/controversial.xml"),
-            "controversial",
-        )),
-        "rust" => Some((include_str!("../rulesets/rust.xml"), "rust")),
-        "opinionated" => Some((include_str!("../rulesets/opinionated.xml"), "opinionated")),
-        _ => None,
-    }
+    BUILTIN_RULESETS
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(name, xml)| (*xml, *name))
 }
 
 fn normalize_builtin_key(ident: &str) -> Option<String> {
@@ -1704,7 +1714,7 @@ fn normalize_builtin_key(ident: &str) -> Option<String> {
     let stem = base.strip_suffix(".xml").unwrap_or(base);
     match stem {
         "codesize" | "naming" | "unusedcode" | "cleancode" | "design" | "controversial"
-        | "rust" | "opinionated" => Some(stem.to_string()),
+        | "explicitness" | "rust" | "opinionated" => Some(stem.to_string()),
         _ => None,
     }
 }
@@ -1793,6 +1803,8 @@ fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
         | "CamelCasePropertyName"
         | "CamelCaseParameterName"
         | "CamelCaseVariableName" => Some("controversial"),
+
+        "ImplicitInput" | "ImplicitOutput" => Some("explicitness"),
 
         _ => None,
     }
@@ -2255,6 +2267,7 @@ mod tests {
             ("cleancode", include_str!("../rulesets/cleancode.xml")),
             ("design", include_str!("../rulesets/design.xml")),
             ("controversial", include_str!("../rulesets/controversial.xml")),
+            ("explicitness", include_str!("../rulesets/explicitness.xml")),
         ];
         let mut count = 0;
         for (set_name, xml) in builtins {
@@ -2270,6 +2283,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(count, 39, "all 39 builtin rules should be indexed");
+        assert_eq!(count, 41, "all 41 builtin rules should be indexed");
     }
 }
