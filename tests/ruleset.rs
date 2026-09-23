@@ -746,6 +746,106 @@ fn later_ruleset_reference_overrides_earlier_property_values() {
 }
 
 #[test]
+fn later_ruleset_reference_without_properties_restores_default_properties() {
+    let dir = TempDir::new().unwrap();
+    let source = write_file(
+        dir.path(),
+        "three_params.rs",
+        "pub fn three(a: u32, b: u32, c: u32) -> u32 { a + b + c }\n",
+    );
+    let custom = dir.path().join("max-b.xml");
+    fs::write(
+        &custom,
+        r#"<ruleset name="b">
+  <rule ref="ExcessiveParameterList">
+    <properties><property name="minimum" value="2"/></properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+
+    // 1. max-b.xml,codesize restores default minimum=10
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        &format!("{},codesize", custom.display()),
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}, stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+
+    // 2. max-b.xml,rust restores default minimum=10 (rust references codesize without properties)
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        &format!("{},rust", custom.display()),
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}, stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+
+    // 3. max10.xml,naming restores default maximum=20
+    let var_source = write_file(
+        dir.path(),
+        "fifteen.rs",
+        "fn check() { let fifteen_chars_x = 1; }\n",
+    );
+    let max10 = dir.path().join("max10.xml");
+    fs::write(
+        &max10,
+        r#"<ruleset name="max10">
+  <rule ref="LongVariable">
+    <properties><property name="maximum" value="10"/></properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[
+        var_source.to_str().unwrap(),
+        "text",
+        &format!("{},naming", max10.display()),
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}, stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+
+    // 4. Custom XML referencing <rule ref="codesize/ExcessiveParameterList"/> without properties
+    let reset_namespaced = dir.path().join("reset_namespaced.xml");
+    fs::write(
+        &reset_namespaced,
+        r#"<ruleset name="reset_namespaced">
+  <rule ref="codesize/ExcessiveParameterList"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        &format!("{},{}", custom.display(), reset_namespaced.display()),
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}, stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+
+    // 5. Custom XML referencing bare <rule ref="ExcessiveParameterList"/> without properties
+    let reset_bare = dir.path().join("reset_bare.xml");
+    fs::write(
+        &reset_bare,
+        r#"<ruleset name="reset_bare">
+  <rule ref="ExcessiveParameterList"/>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[
+        source.to_str().unwrap(),
+        "text",
+        &format!("{},{}", custom.display(), reset_bare.display()),
+    ]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?}, stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+}
+
+#[test]
 fn nested_named_references_keep_override_precedence() {
     let dir = TempDir::new().unwrap();
     let source = write_file(dir.path(), "fixture.rs", &fixture_with_params(6));
