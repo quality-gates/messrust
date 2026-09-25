@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -37,9 +36,18 @@ pub struct ProcessingError {
     pub message: String,
 }
 
-pub enum WriteTarget {
-    Stdout,
-    File(PathBuf),
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(usize)]
+pub(crate) enum ReportFormat {
+    Text,
+    Ansi,
+    Json,
+    Xml,
+    Html,
+    Github,
+    Gitlab,
+    Checkstyle,
+    Sarif,
 }
 
 pub fn exit_code_for(report: &Report, ignore_errors: bool, ignore_violations: bool) -> i32 {
@@ -52,69 +60,77 @@ pub fn exit_code_for(report: &Report, ignore_errors: bool, ignore_violations: bo
     EXIT_SUCCESS
 }
 
-pub(crate) fn formats() -> &'static [&'static str] {
-    &[
-        "text",
-        "xml",
-        "json",
-        "html",
-        "ansi",
-        "github",
-        "gitlab",
-        "checkstyle",
-        "sarif",
-    ]
-}
+impl ReportFormat {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        Self::all()
+            .iter()
+            .copied()
+            .find(|format| format.name() == name)
+    }
 
-pub(crate) fn is_known_format(format: &str) -> bool {
-    formats().contains(&format)
-}
+    pub(crate) fn all() -> &'static [Self] {
+        const ALL: &[ReportFormat] = &[
+            ReportFormat::Text,
+            ReportFormat::Xml,
+            ReportFormat::Json,
+            ReportFormat::Html,
+            ReportFormat::Ansi,
+            ReportFormat::Github,
+            ReportFormat::Gitlab,
+            ReportFormat::Checkstyle,
+            ReportFormat::Sarif,
+        ];
+        ALL
+    }
 
-/// Render a report. `color` colorizes `text` the same way as messgo (`--color`).
-/// Format `ansi` always colorizes rule names and messages.
-pub fn render(
-    format: &str,
-    report: &Report,
-    color: bool,
-    target: WriteTarget,
-    stdout: &mut dyn Write,
-) -> Result<(), String> {
-    // `text` and `ansi` share one writer; only those formats read `colored`.
-    let colored = match format {
-        "ansi" => true,
-        "text" => color,
-        _ => false,
-    };
+    pub(crate) fn name(&self) -> &'static str {
+        const NAMES: [&str; 9] = [
+            "text",
+            "ansi",
+            "json",
+            "xml",
+            "html",
+            "github",
+            "gitlab",
+            "checkstyle",
+            "sarif",
+        ];
+        NAMES[*self as usize]
+    }
 
-    match target {
-        WriteTarget::Stdout => {
-            write_format(format, colored, report, stdout).map_err(|e| e.to_string())?;
-        }
-        WriteTarget::File(path) => {
-            let mut f =
-                std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            write_format(format, colored, report, &mut f).map_err(|e| e.to_string())?;
+    pub(crate) fn render(
+        &self,
+        report: &Report,
+        color: bool,
+        out: &mut dyn Write,
+    ) -> std::io::Result<()> {
+        self.render_with_color(report, self.uses_color(color), out)
+    }
+
+    fn uses_color(&self, color: bool) -> bool {
+        match self {
+            Self::Ansi => true,
+            Self::Text => color,
+            _ => false,
         }
     }
-    Ok(())
-}
 
-fn write_format(
-    format: &str,
-    colored: bool,
-    report: &Report,
-    out: &mut dyn Write,
-) -> std::io::Result<()> {
-    match format {
-        "text" | "ansi" => write_text(report, colored, out),
-        "json" => write_json(report, out),
-        "xml" => write_xml(report, out),
-        "html" => write_html(report, out),
-        "github" => write_github(report, out),
-        "gitlab" => write_gitlab(report, out),
-        "checkstyle" => write_checkstyle(report, out),
-        "sarif" => write_sarif(report, out),
-        _ => unreachable!("unknown format filtered by caller"),
+    fn render_with_color(
+        &self,
+        report: &Report,
+        colored: bool,
+        out: &mut dyn Write,
+    ) -> std::io::Result<()> {
+        match *self {
+            Self::Text | Self::Ansi => write_text(report, colored, out),
+            Self::Json => write_json(report, out),
+            Self::Xml => write_xml(report, out),
+            Self::Html => write_html(report, out),
+            Self::Github => write_github(report, out),
+            Self::Gitlab => write_gitlab(report, out),
+            Self::Checkstyle => write_checkstyle(report, out),
+            Self::Sarif => write_sarif(report, out),
+        }
     }
 }
 
@@ -674,5 +690,153 @@ fn sarif_level(priority: u8) -> &'static str {
         "error"
     } else {
         "warning"
+    }
+}
+
+#[cfg(test)]
+mod report_format_tests {
+    use super::{ProcessingError, Report, ReportFormat, Violation};
+
+    fn synthetic_report() -> Report {
+        Report {
+            violations: vec![Violation {
+                file: "fixture.rs".to_string(),
+                begin_line: 4,
+                end_line: 4,
+                rule_name: "SyntheticRule".to_string(),
+                ruleset_name: "synthetic".to_string(),
+                description: "A synthetic finding".to_string(),
+                priority: 1,
+                package: "fixture".to_string(),
+                function: "run".to_string(),
+                class: String::new(),
+                method: String::new(),
+                external_info_url: String::new(),
+                suppressed: false,
+            }],
+            errors: vec![ProcessingError {
+                file: "broken.rs".to_string(),
+                message: "A synthetic processing error".to_string(),
+            }],
+        }
+    }
+
+    fn render_to_string(format: ReportFormat) -> String {
+        let mut output = Vec::new();
+        format
+            .render(&synthetic_report(), false, &mut output)
+            .unwrap();
+        String::from_utf8(output).unwrap()
+    }
+
+    fn assert_renders_to_memory(format: ReportFormat) {
+        let output = render_to_string(format);
+        assert!(output.contains("fixture.rs"), "format={format:?}: {output}");
+    }
+
+    #[test]
+    fn every_format_parses_from_its_name() {
+        for format in ReportFormat::all() {
+            assert_eq!(ReportFormat::parse(format.name()), Some(*format));
+        }
+        assert_eq!(ReportFormat::parse("unknown"), None);
+    }
+
+    #[test]
+    fn text_renders_to_memory() {
+        assert_renders_to_memory(ReportFormat::Text);
+    }
+
+    #[test]
+    fn ansi_renders_to_memory() {
+        assert_renders_to_memory(ReportFormat::Ansi);
+    }
+
+    #[test]
+    fn json_renders_a_valid_document_to_memory() {
+        let output = render_to_string(ReportFormat::Json);
+        let document: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(document["package"], "messrust");
+        assert_eq!(document["files"][0]["file"], "fixture.rs");
+        assert_eq!(
+            document["files"][0]["violations"][0]["rule"],
+            "SyntheticRule"
+        );
+        assert_eq!(document["files"][0]["violations"][0]["beginLine"], 4);
+        assert_eq!(document["errors"][0]["fileName"], "broken.rs");
+        assert_eq!(
+            document["errors"][0]["message"],
+            "A synthetic processing error"
+        );
+    }
+
+    #[test]
+    fn xml_renders_a_valid_document_to_memory() {
+        let output = render_to_string(ReportFormat::Xml);
+        let document = roxmltree::Document::parse(&output).unwrap();
+        let root = document.root_element();
+        let violation = root
+            .descendants()
+            .find(|node| node.has_tag_name("violation"))
+            .unwrap();
+        let error = root
+            .descendants()
+            .find(|node| node.has_tag_name("error"))
+            .unwrap();
+
+        assert_eq!(root.tag_name().name(), "pmd");
+        let file = violation
+            .ancestors()
+            .find(|node| node.has_tag_name("file"))
+            .unwrap();
+        assert_eq!(file.attribute("name"), Some("fixture.rs"));
+        assert_eq!(violation.attribute("rule"), Some("SyntheticRule"));
+        assert_eq!(violation.attribute("beginline"), Some("4"));
+        assert_eq!(error.attribute("filename"), Some("broken.rs"));
+        assert_eq!(error.attribute("msg"), Some("A synthetic processing error"));
+    }
+
+    #[test]
+    fn html_renders_to_memory() {
+        assert_renders_to_memory(ReportFormat::Html);
+    }
+
+    #[test]
+    fn github_renders_to_memory() {
+        assert_renders_to_memory(ReportFormat::Github);
+    }
+
+    #[test]
+    fn gitlab_renders_to_memory() {
+        assert_renders_to_memory(ReportFormat::Gitlab);
+    }
+
+    #[test]
+    fn checkstyle_renders_to_memory() {
+        assert_renders_to_memory(ReportFormat::Checkstyle);
+    }
+
+    #[test]
+    fn sarif_renders_a_valid_document_to_memory() {
+        let output = render_to_string(ReportFormat::Sarif);
+        let document: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(document["version"], "2.1.0");
+        assert_eq!(document["runs"][0]["results"][0]["ruleId"], "SyntheticRule");
+        assert_eq!(
+            document["runs"][0]["results"][0]["message"]["text"],
+            "A synthetic finding"
+        );
+        assert_eq!(
+            document["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+                ["artifactLocation"]["uri"],
+            "fixture.rs"
+        );
+        assert_eq!(
+            document["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"]
+                ["startLine"],
+            4
+        );
     }
 }
