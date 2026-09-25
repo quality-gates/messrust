@@ -7,12 +7,13 @@ mod report;
 mod ruleset;
 mod suppressions;
 
+use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
 use analyze::analyze_files;
 use discover::{discover, DiscoverOptions};
-use report::{exit_code_for, formats, is_known_format, render, WriteTarget};
+use report::{exit_code_for, Report, ReportFormat};
 use ruleset::{load_and_filter, LoadOptions};
 
 /// Process exit codes (PHPMD family).
@@ -151,8 +152,16 @@ fn print_usage(w: &mut dyn Write) {
            --ignore-violations-on-exit      Exit 0/1 even when findings exist\n\
            --version                        Print version\n\
            --help, -h                       Print this help",
-        formats().join(", ")
+        report_format_names()
     );
+}
+
+fn report_format_names() -> String {
+    ReportFormat::all()
+        .iter()
+        .map(ReportFormat::name)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn parse_args(args: &[String]) -> Result<(Options, Vec<String>), String> {
@@ -256,15 +265,15 @@ fn suffix_list(s: &str) -> Vec<String> {
 }
 
 fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    if !is_known_format(&opt.output.format) {
+    let Some(format) = ReportFormat::parse(&opt.output.format) else {
         let _ = writeln!(
             stderr,
             "error: unknown report format {}. Available: {}",
             opt.output.format,
-            formats().join(", ")
+            report_format_names()
         );
         return EXIT_ERROR;
-    }
+    };
 
     let (files, rules) = match prepare_analysis(&opt, stderr) {
         Ok(prepared) => prepared,
@@ -276,19 +285,8 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
 
     let report = analyze_files(&files, &rules, opt.behavior.strict, opt.input.ignore_tests);
 
-    let target = match &opt.output.report_file {
-        Some(path) => WriteTarget::File(path.clone()),
-        None => WriteTarget::Stdout,
-    };
-
-    if let Err(e) = render(
-        &opt.output.format,
-        &report,
-        opt.output.color,
-        target,
-        stdout,
-    ) {
-        let _ = writeln!(stderr, "error: {e}");
+    if let Err(error) = render_report(format, &report, &opt.output, stdout) {
+        let _ = writeln!(stderr, "error: {error}");
         return EXIT_ERROR;
     }
 
@@ -297,6 +295,26 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         opt.behavior.ignore_errors,
         opt.behavior.ignore_violations,
     )
+}
+
+fn render_report(
+    format: ReportFormat,
+    report: &Report,
+    output: &OutputOptions,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    match &output.report_file {
+        Some(path) => {
+            let mut file =
+                File::create(path).map_err(|error| format!("{}: {error}", path.display()))?;
+            format
+                .render(report, output.color, &mut file)
+                .map_err(|error| error.to_string())
+        }
+        None => format
+            .render(report, output.color, stdout)
+            .map_err(|error| error.to_string()),
+    }
 }
 
 fn prepare_analysis(
