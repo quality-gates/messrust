@@ -374,7 +374,10 @@ pub(crate) fn collect_format_captures(tokens: TokenStream, reads: &mut HashSet<S
                 else {
                     continue;
                 };
-                reads.extend(format_capture_names(&value.value()));
+                for name in format_capture_names(&value.value()) {
+                    reads.insert(format!("r#{name}"));
+                    reads.insert(name);
+                }
             }
             _ => {}
         }
