@@ -418,10 +418,14 @@ fn thread_local_with(node: &syn::ExprMethodCall) -> Option<(String, String)> {
     else {
         return None;
     };
-    let Some(Pat::Ident(param)) = closure.inputs.first() else {
+    let param = match closure.inputs.first()? {
+        Pat::Type(typed) => &*typed.pat,
+        param => param,
+    };
+    let Pat::Ident(param) = param else {
         return None;
     };
-    let key = receiver.path.get_ident()?;
+    let key = &receiver.path.segments.last()?.ident;
     (node.method == "with").then(|| (key.to_string(), param.ident.to_string()))
 }
 
