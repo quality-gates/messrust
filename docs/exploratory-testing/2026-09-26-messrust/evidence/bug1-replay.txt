@@ -1,0 +1,7 @@
+=== Bug 1 Reproducer (via use imports) ===
+[exit=0]
+
+=== Bug 1 Control (explicitly qualified) ===
+/et/fixtures/bug1_control.rs:4   GlobalVariable  Avoid using static mutable state: COUNTER.
+/et/fixtures/bug1_control.rs:13  GlobalVariable  Avoid using static mutable state: TOTAL.
+[exit=2]

@@ -1,0 +1,5 @@
+=== Bug 2 Reproducer: Abstract trait method parameter ===
+/et/fixtures/bug2_trait_param.rs:9   UnusedFormalParameter  Avoid unused parameters such as 'id'.
+/et/fixtures/bug2_trait_param.rs:10  UnusedFormalParameter  Avoid unused parameters such as 'user'.
+/et/fixtures/bug2_trait_param.rs:10  UnusedFormalParameter  Avoid unused parameters such as 'ctx'.
+[exit=2]

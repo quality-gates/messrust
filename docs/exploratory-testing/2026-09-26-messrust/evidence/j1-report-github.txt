@@ -1,0 +1,4 @@
+::warning file=/et/fixtures/service.rs,line=8,col=1::The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes. (LackOfCohesionOfMethods)
+::warning file=/et/fixtures/service.rs,line=45,col=1::The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development. (DevelopmentCodeFragment)
+::warning file=/et/fixtures/service.rs,line=49,col=1::The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10. (ExcessiveParameterList)
+::warning file=/et/fixtures/service.rs,line=68,col=1::Avoid unused local variables such as 'unused_result'. (UnusedLocalVariable)

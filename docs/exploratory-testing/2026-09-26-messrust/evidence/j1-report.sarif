@@ -1,0 +1,142 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 10,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "LackOfCohesionOfMethods"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 45,
+                  "startLine": 45
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development."
+          },
+          "properties": {
+            "priority": 2,
+            "suppressed": false
+          },
+          "ruleId": "DevelopmentCodeFragment"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 64,
+                  "startLine": 49
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "ExcessiveParameterList"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 68,
+                  "startLine": 68
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Avoid unused local variables such as 'unused_result'."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "UnusedLocalVariable"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "messrust",
+          "rules": [
+            {
+              "id": "LackOfCohesionOfMethods",
+              "name": "LackOfCohesionOfMethods",
+              "shortDescription": {
+                "text": "LackOfCohesionOfMethods"
+              }
+            },
+            {
+              "id": "DevelopmentCodeFragment",
+              "name": "DevelopmentCodeFragment",
+              "shortDescription": {
+                "text": "DevelopmentCodeFragment"
+              }
+            },
+            {
+              "id": "ExcessiveParameterList",
+              "name": "ExcessiveParameterList",
+              "shortDescription": {
+                "text": "ExcessiveParameterList"
+              }
+            },
+            {
+              "id": "UnusedLocalVariable",
+              "name": "UnusedLocalVariable",
+              "shortDescription": {
+                "text": "UnusedLocalVariable"
+              }
+            }
+          ],
+          "version": "0.1.13"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

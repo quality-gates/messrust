@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<ruleset name="Custom Params">
+  <rule ref="codesize/ExcessiveParameterList">
+    <properties>
+      <property name="minimum" value="4" />
+    </properties>
+  </rule>
+</ruleset>

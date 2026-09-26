@@ -1,0 +1,4 @@
+/et/fixtures/service.rs:8   [33mLackOfCohesionOfMethods[0m  [31mThe Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.[0m
+/et/fixtures/service.rs:45  [33mDevelopmentCodeFragment[0m  [31mThe method Service::debug_dump() calls the typical debug function println() which is mostly only used during development.[0m
+/et/fixtures/service.rs:49  [33mExcessiveParameterList[0m   [31mThe method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10.[0m
+/et/fixtures/service.rs:68  [33mUnusedLocalVariable[0m      [31mAvoid unused local variables such as 'unused_result'.[0m

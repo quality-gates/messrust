@@ -1,0 +1,20 @@
+=== Custom XML threshold minimum=4 ===
+/et/fixtures/params_test.rs:1  ExcessiveParameterList  The function five_params has 5 parameters. Consider reducing the number of parameters to less than 4.
+[exit=2]
+
+=== Later built-in ruleset restores default threshold minimum=10 ===
+[exit=0]
+
+=== Later custom XML overrides earlier built-in ruleset to minimum=4 ===
+/et/fixtures/params_test.rs:1  ExcessiveParameterList  The function five_params has 5 parameters. Consider reducing the number of parameters to less than 4.
+[exit=2]
+
+=== Exclude rule in custom XML ===
+/et/fixtures/service.rs:8   LackOfCohesionOfMethods  The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.
+/et/fixtures/service.rs:49  ExcessiveParameterList   The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10.
+/et/fixtures/service.rs:68  UnusedLocalVariable      Avoid unused local variables such as 'unused_result'.
+[exit=2]
+
+=== Invalid unresolvable rule in custom XML ===
+error: no rules were loaded from the specified rulesets
+[exit=1]

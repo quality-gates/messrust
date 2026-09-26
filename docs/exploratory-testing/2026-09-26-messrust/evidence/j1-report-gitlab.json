@@ -1,0 +1,58 @@
+[
+    {
+        "type": "issue",
+        "check_name": "LackOfCohesionOfMethods",
+        "description": "The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a383a4c61636b4f66436f686573696f6e4f664d6574686f6473",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 8
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "DevelopmentCodeFragment",
+        "description": "The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a34353a446576656c6f706d656e74436f6465467261676d656e74",
+        "severity": "critical",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 45
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "ExcessiveParameterList",
+        "description": "The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a34393a457863657373697665506172616d657465724c697374",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 49
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "UnusedLocalVariable",
+        "description": "Avoid unused local variables such as 'unused_result'.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a36383a556e757365644c6f63616c5661726961626c65",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 68
+            }
+        }
+    }
+]

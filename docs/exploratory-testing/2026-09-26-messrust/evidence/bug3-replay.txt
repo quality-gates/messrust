@@ -1,0 +1,7 @@
+=== Bug 3 Reproducer: BooleanGetMethodName false positive on non-getter words ===
+/et/fixtures/bug3_boolean_get_prefix.rs:7   BooleanGetMethodName  The 'get_ready()' method which returns a boolean should be named 'is_...()' or 'has_...()'
+/et/fixtures/bug3_boolean_get_prefix.rs:11  BooleanGetMethodName  The 'get_status()' method which returns a boolean should be named 'is_...()' or 'has_...()'
+/et/fixtures/bug3_boolean_get_prefix.rs:16  BooleanGetMethodName  The 'getting_started()' method which returns a boolean should be named 'is_...()' or 'has_...()'
+/et/fixtures/bug3_boolean_get_prefix.rs:20  BooleanGetMethodName  The 'getter()' method which returns a boolean should be named 'is_...()' or 'has_...()'
+/et/fixtures/bug3_boolean_get_prefix.rs:24  BooleanGetMethodName  The 'gets_updated()' method which returns a boolean should be named 'is_...()' or 'has_...()'
+[exit=2]
