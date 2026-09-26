@@ -119,12 +119,11 @@ fn long_class_name_applies_only_first_matching_suffix() {
 #[test]
 fn boolean_get_method_name_treats_exact_get_as_getter() {
     let dir = TempDir::new().unwrap();
-    // Length 3 boundary: "get" must match (>= 3), and "ge" must not (>= 2 mutant).
-    // Letter checks: set_* must not match without the leading 'g'; gea_* without the 't'.
+    // Keep exact "get" and boundary names. Reject words that only start with "get".
     let path = write_file(
         dir.path(),
         "get.rs",
-        "fn get() -> bool { true }\nfn ge() -> bool { true }\nfn getx() -> bool { true }\nfn gat_flag() -> bool { true }\nfn gxt_flag() -> bool { true }\nfn geT_ok() -> bool { true }\nfn set_flag() -> bool { true }\nfn gea_flag() -> bool { true }\n",
+        "fn get() -> bool { true }\nfn ge() -> bool { true }\nfn get_ready() -> bool { true }\nfn GetStatus() -> bool { true }\nfn getting_started() -> bool { true }\nfn getter() -> bool { true }\nfn gets_updated() -> bool { true }\nfn getx() -> bool { true }\nfn gat_flag() -> bool { true }\nfn gxt_flag() -> bool { true }\nfn geT_ok() -> bool { true }\nfn set_flag() -> bool { true }\nfn gea_flag() -> bool { true }\n",
     );
     let (code, out, err) = run_cli(&[
         path.to_str().unwrap(),
@@ -146,32 +145,38 @@ fn boolean_get_method_name_treats_exact_get_as_getter() {
         &path,
         3,
         "BooleanGetMethodName",
-        "The 'getx()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+        "The 'get_ready()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
     );
     assert_finding(
         &out,
         &path,
-        6,
+        4,
+        "BooleanGetMethodName",
+        "The 'GetStatus()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+    assert_finding(
+        &out,
+        &path,
+        11,
         "BooleanGetMethodName",
         "The 'geT_ok()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
     );
-    assert!(!out.contains("'ge()'"), "ge must not be a getter: stdout={out:?}");
-    assert!(
-        !out.contains("gat_flag"),
-        "gat_flag must not be a getter: stdout={out:?}"
-    );
-    assert!(
-        !out.contains("gxt_flag"),
-        "gxt_flag must not be a getter: stdout={out:?}"
-    );
-    assert!(
-        !out.contains("set_flag"),
-        "set_flag must not be a getter: stdout={out:?}"
-    );
-    assert!(
-        !out.contains("gea_flag"),
-        "gea_flag must not be a getter: stdout={out:?}"
-    );
+    for name in [
+        "ge()",
+        "getting_started()",
+        "getter()",
+        "gets_updated()",
+        "getx()",
+        "gat_flag()",
+        "gxt_flag()",
+        "set_flag()",
+        "gea_flag()",
+    ] {
+        assert!(
+            !out.contains(name),
+            "{name} must not be a getter: stdout={out:?}"
+        );
+    }
 }
 
 // --- is_upper_case via ConstantNamingConventions ----------------------------
