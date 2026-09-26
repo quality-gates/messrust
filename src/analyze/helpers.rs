@@ -174,7 +174,13 @@ pub(crate) fn length_without(name: &str, prefixes: &[String], suffixes: &[String
 }
 
 
+fn name_after_raw_prefix(name: &str) -> &str {
+    name.strip_prefix("r#").unwrap_or(name)
+}
+
+
 pub(crate) fn is_pascal_case(name: &str) -> bool {
+    let name = name_after_raw_prefix(name);
     let mut chars = name.chars();
     match chars.next() {
         Some(c) if c.is_uppercase() => !name.contains('_'),
@@ -184,6 +190,7 @@ pub(crate) fn is_pascal_case(name: &str) -> bool {
 
 
 pub(crate) fn is_pascal_case_no_abbrev(name: &str) -> bool {
+    let name = name_after_raw_prefix(name);
     if !is_pascal_case(name) {
         return false;
     }
@@ -195,6 +202,7 @@ pub(crate) fn is_pascal_case_no_abbrev(name: &str) -> bool {
 
 
 pub(crate) fn is_snake_case(name: &str) -> bool {
+    let name = name_after_raw_prefix(name);
     if name.is_empty() {
         return false;
     }
@@ -223,6 +231,7 @@ pub(crate) fn is_tuple_field_name(name: &str) -> bool {
 
 
 pub(crate) fn is_upper_case(name: &str) -> bool {
+    let name = name_after_raw_prefix(name);
     let mut saw_letter = false;
     for c in name.chars() {
         if c == '_' {
