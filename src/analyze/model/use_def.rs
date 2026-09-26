@@ -162,10 +162,11 @@ impl<'ast> Visit<'ast> for UseDefCollector {
     }
 
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+        let Some(body) = &node.default else {
+            return;
+        };
         record_params_from_sig(self, &node.sig);
-        if let Some(body) = &node.default {
-            self.visit_block(body);
-        }
+        self.visit_block(body);
     }
 
     fn visit_field(&mut self, node: &'ast syn::Field) {

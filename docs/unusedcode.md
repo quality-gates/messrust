@@ -112,7 +112,8 @@ Because analysis is per file, inspect calls from other modules before deleting.
 
 Checks function and method parameters except `self`. It reports when the
 file-wide read set does not contain that parameter name. A read of the same
-name in another function can prevent a finding.
+name in another function can prevent a finding. It does not report a parameter
+of an abstract trait method, because that method has no body.
 
 Enable it when the project owns the signatures. Keep it off when an external
 interface requires the parameter. If you enable it, prefix a required unused
