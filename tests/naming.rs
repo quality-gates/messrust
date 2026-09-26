@@ -910,6 +910,46 @@ fn constant_naming_accepts_case_insensitive_pascal_convention() {
 // --- BooleanGetMethodName ---------------------------------------------------
 
 #[test]
+fn boolean_get_method_name_requires_get_name_boundary() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "get_boundary.rs",
+        r#"struct Status;
+impl Status {
+    fn get_ready(&self) -> bool { true }
+    fn GetStatus(&self) -> bool { true }
+    fn getting_started(&self) -> bool { true }
+    fn getter(&self) -> bool { true }
+    fn gets_updated(&self) -> bool { true }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "BooleanGetMethodName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "BooleanGetMethodName",
+        "The 'get_ready()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "BooleanGetMethodName",
+        "The 'GetStatus()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+    for name in ["getting_started", "getter", "gets_updated"] {
+        assert!(
+            !out.contains(&format!("The '{name}()'")),
+            "ordinary name {name} must stay quiet: stdout={out:?}"
+        );
+    }
+}
+
+#[test]
 fn boolean_get_method_name_reports_get_bool_without_params_exact_message() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
