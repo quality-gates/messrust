@@ -368,6 +368,35 @@ fn camel_case_variable_name_reports_bad_local_after_good_local() {
 }
 
 #[test]
+fn raw_identifier_names_that_follow_case_do_not_report() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_ok.rs",
+        "pub struct r#Match;\n\npub struct StructWithField {\n    pub r#type: i32,\n}\n\npub fn r#move(r#type: i32) {\n    let r#fn = r#type;\n    let _ = r#fn;\n}\n",
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "controversial"]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+}
+
+#[test]
+fn raw_identifier_names_that_break_case_still_report() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_bad.rs",
+        "pub struct r#bad_name;\npub fn r#BadName() {}\n",
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "controversial"]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert!(out.contains("CamelCaseClassName"), "stdout={out:?}");
+    assert!(out.contains("r#bad_name"), "stdout={out:?}");
+    assert!(out.contains("CamelCaseMethodName"), "stdout={out:?}");
+    assert!(out.contains("r#BadName"), "stdout={out:?}");
+}
+
+#[test]
 fn clean_idiomatic_rust_passes_full_controversial_set() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
