@@ -249,10 +249,14 @@ pub(crate) fn is_upper_case(name: &str) -> bool {
 
 
 pub(crate) fn is_getter_name(name: &str) -> bool {
-    name.len() >= 3
-        && name.as_bytes()[0].eq_ignore_ascii_case(&b'g')
-        && name.as_bytes()[1].eq_ignore_ascii_case(&b'e')
-        && name.as_bytes()[2].eq_ignore_ascii_case(&b't')
+    let bytes = name.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].eq_ignore_ascii_case(&b'g')
+        && bytes[1].eq_ignore_ascii_case(&b'e')
+        && bytes[2].eq_ignore_ascii_case(&b't')
+        && (bytes.len() == 3
+            || bytes[3] == b'_'
+            || bytes[3].is_ascii_uppercase())
 }
 
 

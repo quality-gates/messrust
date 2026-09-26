@@ -946,6 +946,49 @@ impl Foo {
 }
 
 #[test]
+fn boolean_get_method_name_requires_a_getter_boundary() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "boundaries.rs",
+        r#"struct Foo;
+impl Foo {
+    fn get_ready(&self) -> bool { true }
+    fn GetStatus(&self) -> bool { true }
+    fn getting_started(&self) -> bool { true }
+    fn getter(&self) -> bool { true }
+    fn gets_updated(&self) -> bool { true }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "BooleanGetMethodName");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "BooleanGetMethodName",
+        "The 'get_ready()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "BooleanGetMethodName",
+        "The 'GetStatus()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+    assert!(
+        !out.contains("getting_started"),
+        "getting_started must be quiet: stdout={out:?}"
+    );
+    assert!(!out.contains("getter"), "getter must be quiet: stdout={out:?}");
+    assert!(
+        !out.contains("gets_updated"),
+        "gets_updated must be quiet: stdout={out:?}"
+    );
+}
+
+#[test]
 fn boolean_get_method_name_default_skips_parameterized_without_property() {
     // Kill default-false → true: define the rule inline with no property so the
     // Rust default is the only source of the false value (a catalog ref would
