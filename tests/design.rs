@@ -788,6 +788,165 @@ fn global_variable_reports_mutated_static_mut() {
 }
 
 #[test]
+fn global_variable_reports_static_mut_written_through_use_import() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "use_import.rs",
+        "mod counter_mod {\n    pub static mut COUNTER: usize = 0;\n}\n\nuse counter_mod::COUNTER;\n\nfn bump_counter() {\n    unsafe {\n        COUNTER += 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNTER.",
+    );
+}
+
+#[test]
+fn global_variable_reports_static_mut_written_through_use_super() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "use_super.rs",
+        "static mut TOTAL: usize = 0;\n\nmod worker_mod {\n    use super::TOTAL;\n\n    fn bump_total() {\n        unsafe {\n            TOTAL += 1;\n        }\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "GlobalVariable",
+        "Avoid using static mutable state: TOTAL.",
+    );
+}
+
+#[test]
+fn global_variable_reports_static_mut_written_through_function_use() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fn_use.rs",
+        "mod counter_mod {\n    pub static mut COUNTER: usize = 0;\n}\n\nfn bump_counter() {\n    use counter_mod::COUNTER;\n    unsafe {\n        COUNTER += 1;\n    }\n}\n\nstatic mut TOTAL: usize = 0;\n\nmod worker_mod {\n    fn bump_total() {\n        use super::TOTAL;\n        unsafe {\n            TOTAL += 1;\n        }\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNTER.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        12,
+        "GlobalVariable",
+        "Avoid using static mutable state: TOTAL.",
+    );
+}
+
+#[test]
+fn global_variable_function_use_does_not_hide_sibling_static_mut() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fn_use_sibling.rs",
+        "mod other {\n    pub static mut COUNT: usize = 0;\n}\n\nmod local {\n    static mut COUNT: usize = 0;\n\n    fn bump_local() {\n        unsafe {\n            COUNT += 1;\n        }\n    }\n\n    fn bump_other() {\n        use super::other::COUNT;\n        unsafe {\n            COUNT += 1;\n        }\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNT.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        6,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNT.",
+    );
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.contains("GlobalVariable"))
+            .count(),
+        2,
+        "both statics are mutated: stdout={out:?}"
+    );
+}
+
+#[test]
+fn global_variable_reports_static_mut_written_through_super_path() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "super_path.rs",
+        "static mut TOTAL: usize = 0;\n\nmod worker_mod {\n    fn bump_total() {\n        unsafe {\n            super::TOTAL += 1;\n        }\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "GlobalVariable",
+        "Avoid using static mutable state: TOTAL.",
+    );
+}
+
+#[test]
+fn global_variable_stays_quiet_for_unmutated_static_mut_use_import() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "use_quiet.rs",
+        "mod counter_mod {\n    pub static mut COUNTER: usize = 0;\n}\n\nuse counter_mod::COUNTER;\n\nfn read_counter() -> usize {\n    unsafe { COUNTER }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("GlobalVariable"), "stdout={out:?}");
+}
+
+#[test]
+fn global_variable_does_not_report_other_static_when_use_import_is_mutated() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "use_duplicate.rs",
+        "mod first {\n    pub static mut COUNT: usize = 0;\n}\n\nuse first::COUNT;\n\nfn bump() {\n    unsafe {\n        COUNT += 1;\n    }\n}\n\nmod second {\n    static mut COUNT: usize = 0;\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNT.",
+    );
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.contains("GlobalVariable"))
+            .count(),
+        1,
+        "same-named unmutated static must stay quiet: stdout={out:?}"
+    );
+    assert!(
+        !out.contains(&format!("{}:14", path.display())),
+        "second static must stay quiet: stdout={out:?}"
+    );
+}
+
+#[test]
 fn global_variable_reports_qualified_mutated_static_mut() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

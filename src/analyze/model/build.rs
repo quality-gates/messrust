@@ -738,19 +738,155 @@ pub(crate) struct StaticMutCollector {
     pub(crate) static_muts: Vec<StaticMutSite>,
     pub(crate) mutated: HashSet<String>,
     scope: Vec<String>,
+    imports: HashMap<String, HashMap<String, String>>,
+    block_imports: Vec<HashMap<String, String>>,
+    declared: HashSet<String>,
+    bindings_ready: bool,
+}
+
+
+impl StaticMutCollector {
+    fn collect_module_bindings(&mut self, items: &[Item]) {
+        for item in items {
+            match item {
+                Item::Static(node) => self.record_static(node),
+                Item::Use(node) => self.record_use(node),
+                Item::Mod(node) => {
+                    let Some((_, nested)) = &node.content else {
+                        continue;
+                    };
+                    self.scope.push(node.ident.to_string());
+                    self.collect_module_bindings(nested);
+                    self.scope.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn record_static(&mut self, node: &syn::ItemStatic) {
+        if matches!(node.mutability, syn::StaticMutability::None) {
+            return;
+        }
+        let name = node.ident.to_string();
+        self.static_muts.push(StaticMutSite {
+            key: qualified_name(&self.scope, &name),
+            name,
+            begin_line: node.ident.span().start().line,
+        });
+    }
+
+    fn record_use(&mut self, node: &syn::ItemUse) {
+        let bindings = self.bindings_in_use(node);
+        self.imports
+            .entry(self.scope.join("::"))
+            .or_default()
+            .extend(bindings);
+    }
+
+    fn bindings_in_use(&self, node: &syn::ItemUse) -> HashMap<String, String> {
+        let mut bindings = HashMap::new();
+        let mut prefix = Vec::new();
+        self.collect_use_bindings(
+            &node.tree,
+            &mut prefix,
+            node.leading_colon.is_some(),
+            &mut bindings,
+        );
+        bindings
+    }
+
+    fn collect_use_bindings(
+        &self,
+        tree: &UseTree,
+        prefix: &mut Vec<String>,
+        absolute: bool,
+        bindings: &mut HashMap<String, String>,
+    ) {
+        match tree {
+            UseTree::Path(path) => {
+                prefix.push(path.ident.to_string());
+                self.collect_use_bindings(&path.tree, prefix, absolute, bindings);
+                prefix.pop();
+            }
+            UseTree::Name(name) => {
+                let imported_name = name.ident.to_string();
+                if imported_name == "self" {
+                    let Some(alias) = prefix.last().cloned() else {
+                        return;
+                    };
+                    self.bind_import(alias, prefix, absolute, bindings);
+                } else {
+                    prefix.push(imported_name.clone());
+                    self.bind_import(imported_name, prefix, absolute, bindings);
+                    prefix.pop();
+                }
+            }
+            UseTree::Rename(rename) => {
+                let alias = rename.rename.to_string();
+                if alias == "_" {
+                    return;
+                }
+                prefix.push(rename.ident.to_string());
+                self.bind_import(alias, prefix, absolute, bindings);
+                prefix.pop();
+            }
+            UseTree::Glob(_) => {}
+            UseTree::Group(group) => {
+                for item in &group.items {
+                    self.collect_use_bindings(item, prefix, absolute, bindings);
+                }
+            }
+        }
+    }
+
+    fn bind_import(
+        &self,
+        alias: String,
+        segments: &[String],
+        absolute: bool,
+        bindings: &mut HashMap<String, String>,
+    ) {
+        let Some(key) =
+            path_key_from_segments(segments.iter().map(String::as_str), &self.scope, absolute)
+        else {
+            return;
+        };
+        bindings.insert(alias, key);
+    }
 }
 
 
 impl<'ast> Visit<'ast> for StaticMutCollector {
+    fn visit_file(&mut self, node: &'ast syn::File) {
+        self.collect_module_bindings(&node.items);
+        self.declared = self
+            .static_muts
+            .iter()
+            .map(|site| site.key.clone())
+            .collect();
+        self.bindings_ready = true;
+        syn::visit::visit_file(self, node);
+    }
+
     fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
-        if !matches!(node.mutability, syn::StaticMutability::None) {
-            let name = node.ident.to_string();
-            self.static_muts.push(StaticMutSite {
-                key: qualified_name(&self.scope, &name),
-                name,
-                begin_line: node.ident.span().start().line,
-            });
+        if self.bindings_ready {
+            return;
         }
+        self.record_static(node);
+    }
+
+    fn visit_block(&mut self, node: &'ast syn::Block) {
+        let mut local = HashMap::new();
+        for stmt in &node.stmts {
+            let syn::Stmt::Item(Item::Use(use_item)) = stmt else {
+                continue;
+            };
+            local.extend(self.bindings_in_use(use_item));
+        }
+        self.block_imports.push(local);
+        syn::visit::visit_block(self, node);
+        self.block_imports.pop();
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
@@ -765,7 +901,14 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
     }
 
     fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
-        collect_mutated_static_place(&node.left, &self.scope, &mut self.mutated);
+        collect_mutated_static_place(
+            &node.left,
+            &self.scope,
+            &self.imports,
+            &self.block_imports,
+            &self.declared,
+            &mut self.mutated,
+        );
         syn::visit::visit_expr_assign(self, node);
     }
 
@@ -783,7 +926,14 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
                 | syn::BinOp::ShlAssign(_)
                 | syn::BinOp::ShrAssign(_)
         ) {
-            collect_mutated_static_place(&node.left, &self.scope, &mut self.mutated);
+            collect_mutated_static_place(
+                &node.left,
+                &self.scope,
+                &self.imports,
+                &self.block_imports,
+                &self.declared,
+                &mut self.mutated,
+            );
         }
         syn::visit::visit_expr_binary(self, node);
     }
@@ -799,23 +949,21 @@ fn qualified_name(scope: &[String], name: &str) -> String {
 }
 
 
-fn static_path_key(path: &syn::Path, scope: &[String]) -> Option<String> {
-    let mut components = if path.leading_colon.is_some() {
-        Vec::new()
-    } else {
-        scope.to_vec()
-    };
+fn path_key_from_segments<'a, I>(segments: I, scope: &[String], absolute: bool) -> Option<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut components = if absolute { Vec::new() } else { scope.to_vec() };
     let mut has_name = false;
-    for segment in &path.segments {
-        let name = segment.ident.to_string();
-        match name.as_str() {
+    for name in segments {
+        match name {
             "crate" => components.clear(),
             "self" => {}
             "super" => {
                 components.pop();
             }
             _ => {
-                components.push(name);
+                components.push(name.to_string());
                 has_name = true;
             }
         }
@@ -824,24 +972,81 @@ fn static_path_key(path: &syn::Path, scope: &[String]) -> Option<String> {
 }
 
 
+fn join_import_key(base: &str, rest: &[String]) -> String {
+    if rest.is_empty() {
+        return base.to_string();
+    }
+    if base.is_empty() {
+        return rest.join("::");
+    }
+    format!("{base}::{}", rest.join("::"))
+}
+
+
+fn resolve_mutated_static_path(
+    path: &syn::Path,
+    scope: &[String],
+    imports: &HashMap<String, HashMap<String, String>>,
+    block_imports: &[HashMap<String, String>],
+    declared: &HashSet<String>,
+) -> Option<String> {
+    let names: Vec<String> = path
+        .segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect();
+    let first = names.first()?;
+    let absolute = path.leading_colon.is_some();
+    if !absolute && !matches!(first.as_str(), "crate" | "self" | "super") {
+        for frame in block_imports.iter().rev() {
+            if let Some(bound) = frame.get(first) {
+                return Some(join_import_key(bound, &names[1..]));
+            }
+        }
+        let local = qualified_name(scope, first);
+        if names.len() == 1 && declared.contains(&local) {
+            return Some(local);
+        }
+        if let Some(bound) = imports
+            .get(&scope.join("::"))
+            .and_then(|bindings| bindings.get(first))
+        {
+            return Some(join_import_key(bound, &names[1..]));
+        }
+    }
+    path_key_from_segments(names.iter().map(String::as_str), scope, absolute)
+}
+
+
 fn collect_mutated_static_place(
     expr: &syn::Expr,
     scope: &[String],
+    imports: &HashMap<String, HashMap<String, String>>,
+    block_imports: &[HashMap<String, String>],
+    declared: &HashSet<String>,
     mutated: &mut HashSet<String>,
 ) {
     match expr {
         syn::Expr::Path(p) => {
             if p.qself.is_none() {
-                if let Some(key) = static_path_key(&p.path, scope) {
+                if let Some(key) =
+                    resolve_mutated_static_path(&p.path, scope, imports, block_imports, declared)
+                {
                     mutated.insert(key);
                 }
             }
         }
-        syn::Expr::Field(f) => collect_mutated_static_place(&f.base, scope, mutated),
-        syn::Expr::Index(i) => collect_mutated_static_place(&i.expr, scope, mutated),
-        syn::Expr::Paren(p) => collect_mutated_static_place(&p.expr, scope, mutated),
+        syn::Expr::Field(f) => {
+            collect_mutated_static_place(&f.base, scope, imports, block_imports, declared, mutated)
+        }
+        syn::Expr::Index(i) => {
+            collect_mutated_static_place(&i.expr, scope, imports, block_imports, declared, mutated)
+        }
+        syn::Expr::Paren(p) => {
+            collect_mutated_static_place(&p.expr, scope, imports, block_imports, declared, mutated)
+        }
         syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => {
-            collect_mutated_static_place(&u.expr, scope, mutated)
+            collect_mutated_static_place(&u.expr, scope, imports, block_imports, declared, mutated)
         }
         _ => {}
     }
