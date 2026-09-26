@@ -249,10 +249,23 @@ pub(crate) fn is_upper_case(name: &str) -> bool {
 
 
 pub(crate) fn is_getter_name(name: &str) -> bool {
-    name.len() >= 3
-        && name.as_bytes()[0].eq_ignore_ascii_case(&b'g')
-        && name.as_bytes()[1].eq_ignore_ascii_case(&b'e')
-        && name.as_bytes()[2].eq_ignore_ascii_case(&b't')
+    let Some(prefix) = name.get(..3) else {
+        return false;
+    };
+    let Some(suffix) = name.get(3..) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case("get") {
+        return false;
+    }
+
+    suffix.is_empty()
+        || suffix.starts_with("_")
+        || ((prefix == "get" || prefix == "Get")
+            && suffix
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_uppercase()))
 }
 
 

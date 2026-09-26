@@ -141,12 +141,9 @@ fn boolean_get_method_name_treats_exact_get_as_getter() {
         "BooleanGetMethodName",
         "The 'get()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
     );
-    assert_finding(
-        &out,
-        &path,
-        3,
-        "BooleanGetMethodName",
-        "The 'getx()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    assert!(
+        !out.contains("getx()"),
+        "getx has no getter boundary: stdout={out:?}"
     );
     assert_finding(
         &out,
