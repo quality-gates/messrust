@@ -288,3 +288,68 @@ fn push(byte: u8) {\n\
         )]
     );
 }
+
+#[test]
+fn write_through_qualified_thread_local_key_is_an_implicit_output() {
+    let source = "use std::cell::Cell;\n\
+thread_local! {\n    static COUNTER: Cell<u32> = Cell::new(0);\n}\n\
+fn bump() {\n\
+    self::COUNTER.with(|c| c.set(1));\n\
+}\n";
+    let (_, found) = run_ruleset(source, "explicitness");
+    assert_eq!(
+        found,
+        vec![expect(
+            6,
+            "ImplicitOutput",
+            "The function 'bump' has an implicit output: it writes the global 'COUNTER'."
+        )]
+    );
+}
+
+#[test]
+fn write_through_typed_thread_local_closure_parameter_is_an_implicit_output() {
+    let source = "use std::cell::{Cell, RefCell};\n\
+thread_local! {\n    static COUNTER: Cell<u32> = Cell::new(0);\n}\n\
+thread_local! {\n    static LOG: RefCell<Vec<i32>> = RefCell::new(Vec::new());\n}\n\
+fn bump() {\n\
+    COUNTER.with(|c: &Cell<u32>| c.set(1));\n\
+}\n\
+fn log() {\n\
+    LOG.with(|v: &RefCell<Vec<i32>>| v.borrow_mut().push(1));\n\
+}\n";
+    let (_, found) = run_ruleset(source, "explicitness");
+    assert_eq!(
+        found,
+        vec![
+            expect(
+                9,
+                "ImplicitOutput",
+                "The function 'bump' has an implicit output: it writes the global 'COUNTER'."
+            ),
+            expect(
+                12,
+                "ImplicitOutput",
+                "The function 'log' has an implicit output: it writes the global 'LOG'."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn read_through_typed_qualified_thread_local_key_stays_an_implicit_input() {
+    let source = "use std::cell::Cell;\n\
+thread_local! {\n    static COUNTER: Cell<u32> = Cell::new(0);\n}\n\
+fn peek() -> u32 {\n\
+    self::COUNTER.with(|c: &Cell<u32>| c.get())\n\
+}\n";
+    let (_, found) = run_ruleset(source, "explicitness");
+    assert_eq!(
+        found,
+        vec![expect(
+            6,
+            "ImplicitInput",
+            "The function 'peek' has an implicit input: it reads the global 'COUNTER'."
+        )]
+    );
+}
