@@ -867,3 +867,91 @@ fn work() {
     let (code, out, err) = run_only(&path, "UnusedLocalVariable");
     assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
 }
+
+#[test]
+fn unused_formal_parameter_counts_raw_ident_format_capture_as_a_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "param_raw_capture.rs",
+        r#"
+pub fn print_param(r#type: i32) {
+    println!("{type}");
+}
+pub fn print_param_spec(r#type: f64, width: usize) {
+    println!("{type:.*}", width);
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedFormalParameter");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_variable_counts_raw_ident_format_capture_as_a_read() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "local_raw_capture.rs",
+        r#"
+pub fn print_local() {
+    let r#type = 42;
+    println!("{type}");
+}
+pub fn print_local_spec(width: usize) {
+    let r#type = 3.14;
+    println!("{type:.*}", width);
+}
+pub fn print_spec_raw_width() {
+    let r#width = 5;
+    println!("{:width$}", 10);
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_local_variable_reports_unread_raw_identifier() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_unread.rs",
+        r#"
+pub fn f() {
+    let r#unused = 1;
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as 'r#unused'.",
+    );
+}
+
+#[test]
+fn unused_formal_parameter_reports_unread_raw_param() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_param_unread.rs",
+        r#"
+pub fn f(r#unused: i32) {}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedFormalParameter");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "UnusedFormalParameter",
+        "Avoid unused parameters such as 'r#unused'.",
+    );
+}
