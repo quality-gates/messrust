@@ -494,6 +494,30 @@ fn unused_formal_parameter_reports_unread_in_other_function() {
 }
 
 #[test]
+fn unused_formal_parameter_skips_abstract_trait_method() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "abstract_trait_param.rs",
+        "pub trait Repository {\n    fn find_by_id(id: u64);\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedFormalParameter");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
+fn unused_formal_parameter_counts_read_in_trait_default_body() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "trait_default_read.rs",
+        "pub trait Repository {\n    fn default_helper(&self, prefix: &str) -> String {\n        format!(\"{prefix}: default\")\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "UnusedFormalParameter");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
 fn unused_private_field_reports_unread_private_field() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
