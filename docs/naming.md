@@ -109,6 +109,8 @@ static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 Set `convention=pascal` only when the project deliberately wants PascalCase.
 That setting does not change `rustc` or Clippy.
 
+The rule ignores anonymous constants such as `const _: () = { ... };`.
+
 ## Configure a project policy
 
 ```xml

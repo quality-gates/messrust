@@ -834,6 +834,51 @@ fn constant_naming_checks_trait_associated_const_with_exact_message() {
 }
 
 #[test]
+fn constant_naming_ignores_anonymous_constants() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "anon.rs",
+        "const _: () = {\n    assert!(1 + 1 == 2);\n};\nstruct S;\nimpl S {\n    const _: () = ();\n}\ntrait T {\n    const _: ();\n}\nconst bad_name: i32 = 1;\n",
+    );
+    let (code, out, err) = run_only(&path, "ConstantNamingConventions");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(
+        !out.contains("Constant _ should"),
+        "anonymous const quiet: stdout={out:?}"
+    );
+    assert_finding(
+        &out,
+        &path,
+        11,
+        "ConstantNamingConventions",
+        "Constant bad_name should be defined in SCREAMING_SNAKE_CASE",
+    );
+}
+
+#[test]
+fn constant_naming_ignores_anonymous_constant_under_pascal_convention() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "anonp.rs", "const _: () = ();\n");
+    let xml = dir.path().join("cn.xml");
+    fs::write(
+        &xml,
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="cn">
+  <rule ref="naming/ConstantNamingConventions">
+    <properties>
+      <property name="convention" value="pascal"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    )
+    .unwrap();
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+}
+
+#[test]
 fn constant_naming_accepts_case_insensitive_pascal_convention() {
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "ci.rs", "const MY_NUM: i32 = 1;\n");
