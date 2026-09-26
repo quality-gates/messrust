@@ -1,0 +1,18 @@
+=== Journey 1: Stricter policy (rust,opinionated) ===
+/et/fixtures/service.rs:8   LackOfCohesionOfMethods  The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.
+/et/fixtures/service.rs:23  BooleanArgumentFlag      The method Service::process_order has a boolean flag argument notify, which is a certain sign of a Single Responsibility Principle violation.
+/et/fixtures/service.rs:33  ElseExpression           The method check_limit uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them.
+/et/fixtures/service.rs:40  StaticAccess             Avoid using static access to class 'Helper' in method 'audit'.
+/et/fixtures/service.rs:45  DevelopmentCodeFragment  The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/service.rs:49  ExcessiveParameterList   The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10.
+/et/fixtures/service.rs:51  ShortVariable            Avoid variables with short names like p1. Configured minimum length is 3.
+/et/fixtures/service.rs:52  ShortVariable            Avoid variables with short names like p2. Configured minimum length is 3.
+/et/fixtures/service.rs:53  ShortVariable            Avoid variables with short names like p3. Configured minimum length is 3.
+/et/fixtures/service.rs:54  ShortVariable            Avoid variables with short names like p4. Configured minimum length is 3.
+/et/fixtures/service.rs:55  ShortVariable            Avoid variables with short names like p5. Configured minimum length is 3.
+/et/fixtures/service.rs:56  ShortVariable            Avoid variables with short names like p6. Configured minimum length is 3.
+/et/fixtures/service.rs:57  ShortVariable            Avoid variables with short names like p7. Configured minimum length is 3.
+/et/fixtures/service.rs:58  ShortVariable            Avoid variables with short names like p8. Configured minimum length is 3.
+/et/fixtures/service.rs:59  ShortVariable            Avoid variables with short names like p9. Configured minimum length is 3.
+/et/fixtures/service.rs:68  UnusedLocalVariable      Avoid unused local variables such as 'unused_result'.
+[exit=2]

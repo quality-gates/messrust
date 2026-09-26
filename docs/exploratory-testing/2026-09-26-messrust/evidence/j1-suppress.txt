@@ -1,0 +1,9 @@
+=== Suppression Default (hidden) ===
+/et/fixtures/suppression.rs:28  ExcessiveParameterList  The method unsuppressed_wide has 11 parameters. Consider reducing the number of parameters to less than 10.
+[exit=2]
+
+=== Suppression Strict (audit mode) ===
+/et/fixtures/suppression.rs:6   DevelopmentCodeFragment [suppressed]  The method Target::dump_info() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/suppression.rs:10  ExcessiveParameterList [suppressed]   The method wide_function has 11 parameters. Consider reducing the number of parameters to less than 10.
+/et/fixtures/suppression.rs:28  ExcessiveParameterList                The method unsuppressed_wide has 11 parameters. Consider reducing the number of parameters to less than 10.
+[exit=2]

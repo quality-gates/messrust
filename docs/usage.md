@@ -175,3 +175,8 @@ Names are case-insensitive and may be separated by commas or spaces.
 starts a region on the following line; `enable` closes only the named rules.
 Malformed directives are ignored. Normal reports omit suppressed findings;
 `--strict` keeps them marked suppressed.
+
+## Exploratory testing
+
+- [2026-09-26 report](exploratory-testing/2026-09-26-messrust/REPORT.md)
+

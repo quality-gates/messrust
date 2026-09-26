@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<ruleset name="Invalid Rule">
+  <rule ref="NonExistentRule" />
+</ruleset>

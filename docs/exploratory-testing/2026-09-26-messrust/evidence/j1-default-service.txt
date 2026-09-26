@@ -1,0 +1,6 @@
+=== Journey 1: Default service check (rust ruleset) ===
+/et/fixtures/service.rs:8   LackOfCohesionOfMethods  The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.
+/et/fixtures/service.rs:45  DevelopmentCodeFragment  The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/service.rs:49  ExcessiveParameterList   The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10.
+/et/fixtures/service.rs:68  UnusedLocalVariable      Avoid unused local variables such as 'unused_result'.
+[exit=2]

@@ -1,0 +1,44 @@
+pub struct Target;
+
+impl Target {
+    pub fn dump_info(&self) {
+        // messrust-disable-next-line DevelopmentCodeFragment
+        println!("suppressed log");
+    }
+
+    // messrust-disable ExcessiveParameterList
+    pub fn wide_function(
+        &self,
+        a: u32,
+        b: u32,
+        c: u32,
+        d: u32,
+        e: u32,
+        f: u32,
+        g: u32,
+        h: u32,
+        i: u32,
+        j: u32,
+        k: u32,
+    ) -> u32 {
+        a + b + c + d + e + f + g + h + i + j + k
+    }
+    // messrust-enable ExcessiveParameterList
+
+    pub fn unsuppressed_wide(
+        &self,
+        a: u32,
+        b: u32,
+        c: u32,
+        d: u32,
+        e: u32,
+        f: u32,
+        g: u32,
+        h: u32,
+        i: u32,
+        j: u32,
+        k: u32,
+    ) -> u32 {
+        a + b + c + d + e + f + g + h + i + j + k
+    }
+}

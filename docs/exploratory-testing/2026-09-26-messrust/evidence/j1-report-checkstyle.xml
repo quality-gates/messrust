@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="0.1.13">
+  <file name="/et/fixtures/service.rs">
+    <error line="8" column="1" severity="warning" message="The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes." source="Design Rules/LackOfCohesionOfMethods"/>
+    <error line="45" column="1" severity="error" message="The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development." source="Design Rules/DevelopmentCodeFragment"/>
+    <error line="49" column="1" severity="warning" message="The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10." source="Code Size Rules/ExcessiveParameterList"/>
+    <error line="68" column="1" severity="warning" message="Avoid unused local variables such as &#039;unused_result&#039;." source="Unused Code Rules/UnusedLocalVariable"/>
+  </file>
+</checkstyle>

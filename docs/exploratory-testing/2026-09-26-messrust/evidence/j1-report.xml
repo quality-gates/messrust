@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<pmd version="0.1.13" tool="messrust" timestamp="2026-09-26T00:21:55Z">
+  <file name="/et/fixtures/service.rs">
+    <violation beginline="8" endline="10" rule="LackOfCohesionOfMethods" ruleset="Design Rules" class="Service" priority="3" suppressed="false">
+      The Service has a Lack of Cohesion Of Methods (LCOM4) value of 2. Consider to split this class into 2 smaller classes.
+    </violation>
+    <violation beginline="45" endline="45" rule="DevelopmentCodeFragment" ruleset="Design Rules" priority="2" suppressed="false">
+      The method Service::debug_dump() calls the typical debug function println() which is mostly only used during development.
+    </violation>
+    <violation beginline="49" endline="64" rule="ExcessiveParameterList" ruleset="Code Size Rules" class="Service" method="configure_pipeline" priority="3" suppressed="false">
+      The method configure_pipeline has 11 parameters. Consider reducing the number of parameters to less than 10.
+    </violation>
+    <violation beginline="68" endline="68" rule="UnusedLocalVariable" ruleset="Unused Code Rules" priority="3" suppressed="false">
+      Avoid unused local variables such as &#039;unused_result&#039;.
+    </violation>
+  </file>
+</pmd>
