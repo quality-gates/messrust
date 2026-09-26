@@ -152,7 +152,8 @@ pub(crate) fn apply_constant_naming(
         .map(String::as_str)
         .unwrap_or("upper");
     let pascal = convention.eq_ignore_ascii_case("pascal");
-    for c in &model.constants {
+    // `const _` is an anonymous constant with no name to check.
+    for c in model.constants.iter().filter(|c| c.name != "_") {
         let ok = if pascal {
             is_pascal_case(&c.name)
         } else {
