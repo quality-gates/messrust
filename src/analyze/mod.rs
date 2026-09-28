@@ -55,20 +55,45 @@ pub(crate) fn analyze_one(
     ignore_tests: bool,
 ) -> Result<Vec<Violation>, String> {
     let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let file = parse::parse_file(&src)?;
-    let file_name = path.display().to_string();
-    let production = ignore_tests.then(|| without_test_modules(&file));
-    let model = FileModel::from_file(&file, production.as_ref(), &src);
+    let options = AnalysisOptions {
+        strict,
+        ignore_tests,
+    };
+    analyze_source(&path.display().to_string(), &src, rules, &options)
+}
+
+
+/// Options that change how `analyze_source` treats one source text.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AnalysisOptions {
+    /// Keep suppressed findings and mark them `suppressed`.
+    pub strict: bool,
+    /// Skip `#[cfg(test)]` modules.
+    pub ignore_tests: bool,
+}
+
+
+/// Analyzes in-memory `source` with `rules`. `path` is only the display name
+/// of each finding; this function does no file I/O.
+pub(crate) fn analyze_source(
+    path: &str,
+    source: &str,
+    rules: &[LoadedRule],
+    options: &AnalysisOptions,
+) -> Result<Vec<Violation>, String> {
+    let file = parse::parse_file(source)?;
+    let production = options.ignore_tests.then(|| without_test_modules(&file));
+    let model = FileModel::from_file(&file, production.as_ref(), source);
     let mut violations = Vec::new();
     for rule in rules {
-        apply_rule(rule, &file_name, &model, &mut violations);
+        apply_rule(rule, path, &model, &mut violations);
     }
-    let suppressions = Suppressions::from_source(&src);
+    let suppressions = Suppressions::from_source(source);
     violations.retain_mut(|violation| {
         if !suppressions.contains(violation.begin_line, &violation.rule_name) {
             return true;
         }
-        if strict {
+        if options.strict {
             violation.suppressed = true;
             true
         } else {
@@ -213,6 +238,88 @@ pub(crate) fn apply_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ruleset::{load_and_filter, LoadOptions};
+
+    fn naming_rule(name: &str) -> Vec<LoadedRule> {
+        let opts = LoadOptions::default();
+        load_and_filter(
+            &["naming".to_string()],
+            &[name.to_string()],
+            &[],
+            &opts,
+            &mut |_| {},
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn analyze_source_reports_finding_with_display_path() {
+        let rules = naming_rule("ShortClassName");
+        let options = AnalysisOptions::default();
+
+        let violations = analyze_source("mem/a.rs", "\nstruct A;\n", &rules, &options).unwrap();
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule_name, "ShortClassName");
+        assert_eq!(violations[0].file, "mem/a.rs");
+        assert_eq!(violations[0].begin_line, 2);
+        assert!(!violations[0].suppressed);
+    }
+
+    #[test]
+    fn analyze_source_drops_suppressed_finding_unless_strict() {
+        let rules = naming_rule("ShortClassName");
+        let source = "// messrust-disable-next-line ShortClassName\nstruct A;\n";
+
+        let lenient = AnalysisOptions {
+            strict: false,
+            ignore_tests: false,
+        };
+        assert!(analyze_source("a.rs", source, &rules, &lenient)
+            .unwrap()
+            .is_empty());
+
+        let strict = AnalysisOptions {
+            strict: true,
+            ignore_tests: false,
+        };
+        let violations = analyze_source("a.rs", source, &rules, &strict).unwrap();
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].suppressed);
+    }
+
+    #[test]
+    fn analyze_source_skips_test_modules_when_ignoring_tests() {
+        let rules = naming_rule("ShortClassName");
+        let source = "#[cfg(test)]\nmod tests {\n    struct A;\n}\n";
+
+        let with_tests = AnalysisOptions::default();
+        assert_eq!(
+            analyze_source("a.rs", source, &rules, &with_tests)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let without_tests = AnalysisOptions {
+            strict: false,
+            ignore_tests: true,
+        };
+        assert!(analyze_source("a.rs", source, &rules, &without_tests)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn analyze_source_returns_parse_error_message() {
+        let rules = naming_rule("ShortClassName");
+        let source = "fn broken( {\n";
+
+        let error =
+            analyze_source("a.rs", source, &rules, &AnalysisOptions::default()).unwrap_err();
+
+        assert_eq!(Some(error), parse::parse_file(source).err());
+    }
 
     #[test]
     fn is_test_module_distinguishes_positive_and_negative_test_guards() {
