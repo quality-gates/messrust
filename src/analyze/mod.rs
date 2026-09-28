@@ -55,11 +55,15 @@ pub(crate) fn analyze_one(
     ignore_tests: bool,
 ) -> Result<Vec<Violation>, String> {
     let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let options = AnalysisOptions {
-        strict,
-        ignore_tests,
-    };
-    analyze_source(&path.display().to_string(), &src, rules, &options)
+    analyze_source(
+        &path.display().to_string(),
+        &src,
+        rules,
+        &AnalysisOptions {
+            strict,
+            ignore_tests,
+        },
+    )
 }
 
 
@@ -271,17 +275,14 @@ mod tests {
         let rules = naming_rule("ShortClassName");
         let source = "// messrust-disable-next-line ShortClassName\nstruct A;\n";
 
-        let lenient = AnalysisOptions {
-            strict: false,
-            ignore_tests: false,
-        };
+        let lenient = AnalysisOptions::default();
         assert!(analyze_source("a.rs", source, &rules, &lenient)
             .unwrap()
             .is_empty());
 
         let strict = AnalysisOptions {
             strict: true,
-            ignore_tests: false,
+            ..Default::default()
         };
         let violations = analyze_source("a.rs", source, &rules, &strict).unwrap();
         assert_eq!(violations.len(), 1);
@@ -302,8 +303,8 @@ mod tests {
         );
 
         let without_tests = AnalysisOptions {
-            strict: false,
             ignore_tests: true,
+            ..Default::default()
         };
         assert!(analyze_source("a.rs", source, &rules, &without_tests)
             .unwrap()
@@ -313,12 +314,10 @@ mod tests {
     #[test]
     fn analyze_source_returns_parse_error_message() {
         let rules = naming_rule("ShortClassName");
-        let source = "fn broken( {\n";
-
         let error =
-            analyze_source("a.rs", source, &rules, &AnalysisOptions::default()).unwrap_err();
+            analyze_source("a.rs", "fn {}\n", &rules, &AnalysisOptions::default()).unwrap_err();
 
-        assert_eq!(Some(error), parse::parse_file(source).err());
+        assert_eq!(error, "expected identifier");
     }
 
     #[test]
