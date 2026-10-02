@@ -479,7 +479,7 @@ fn full_ruleset_reference_keeps_named_excludes() {
 
 #[test]
 fn unknown_ruleset_name_reports_a_clear_error() {
-    // read_ruleset: an identifier that matches neither a builtin name nor a
+    // An identifier that matches neither a builtin name nor a
     // file on disk must fail with a clear message naming the bad spec.
     let dir = TempDir::new().unwrap();
     let path = write_file(dir.path(), "clean.rs", &fixture_with_params(0));

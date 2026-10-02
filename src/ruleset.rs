@@ -1643,10 +1643,10 @@ const RULE_KINDS: &[(&str, RuleKind)] = &[
     ),
 ];
 
-/// The source one ruleset identifier selects. `resolve` owns the one
-/// precedence order: a file beside the referencing ruleset, then a file at
-/// the given path, then a built-in name (`naming`, `naming.xml`, or
-/// `rulesets/naming.xml`). Any other missing path is an error.
+/// The source that one ruleset identifier selects. `resolve` is the only
+/// function that sets the order: a file beside the referencing ruleset, then
+/// a file at the given path, then a built-in name (`naming`, `naming.xml`, or
+/// `rulesets/naming.xml`). All other missing paths are errors.
 #[derive(Debug, PartialEq)]
 enum RulesetSource {
     File { path: PathBuf, canonical: PathBuf },
@@ -1712,7 +1712,7 @@ impl RulesetSource {
                 .iter()
                 .find(|(name, _)| name == key)
                 .map(|(_, xml)| xml.to_string())
-                .unwrap_or_default()),
+                .expect("built-in key comes from BUILTIN_RULESETS")),
         }
     }
 }
@@ -2427,6 +2427,21 @@ mod tests {
         fs::write(&sibling, "<ruleset/>").unwrap();
 
         let source = RulesetSource::resolve(Some(dir.path()), "naming.xml").unwrap();
+
+        assert_eq!(source, file_source(&sibling));
+    }
+
+    #[test]
+    fn sibling_file_wins_over_an_existing_given_path() {
+        // Tests run from the package root, so `rulesets/naming.xml` also
+        // exists at the given path.
+        let dir = TempDir::new().unwrap();
+        let sibling = dir.path().join("rulesets").join("naming.xml");
+        fs::create_dir_all(sibling.parent().unwrap()).unwrap();
+        fs::write(&sibling, "<ruleset/>").unwrap();
+        assert!(Path::new("rulesets/naming.xml").is_file());
+
+        let source = RulesetSource::resolve(Some(dir.path()), "rulesets/naming.xml").unwrap();
 
         assert_eq!(source, file_source(&sibling));
     }
