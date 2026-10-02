@@ -276,8 +276,8 @@ pub(crate) struct StaticAccessCollector<'a> {
 
 
 impl StaticAccessCollector<'_> {
-    pub(crate) fn consider_path(&mut self, path: &syn::Path, line: usize) {
-        let Some(type_name) = static_receiver_type(path) else {
+    pub(crate) fn consider_path(&mut self, expr: &syn::ExprPath, line: usize) {
+        let Some(type_name) = static_call_receiver(expr) else {
             return;
         };
         if type_name == "Self" {
@@ -297,7 +297,7 @@ impl StaticAccessCollector<'_> {
 impl<'ast> Visit<'ast> for StaticAccessCollector<'_> {
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*node.func {
-            self.consider_path(&p.path, p.span().start().line);
+            self.consider_path(p, p.span().start().line);
         }
         syn::visit::visit_expr_call(self, node);
     }
@@ -306,6 +306,26 @@ impl<'ast> Visit<'ast> for StaticAccessCollector<'_> {
     fn visit_impl_item_fn(&mut self, _node: &'ast syn::ImplItemFn) {}
     fn visit_trait_item_fn(&mut self, _node: &'ast syn::TraitItemFn) {}
     fn visit_expr_closure(&mut self, _node: &'ast syn::ExprClosure) {}
+}
+
+
+pub(crate) fn static_call_receiver(expr: &syn::ExprPath) -> Option<String> {
+    // `<Helper>::make()` and `<Helper as Trait>::make()` carry the receiver
+    // in `qself.ty`; `path` then holds only the method or the trait path.
+    let Some(qself) = &expr.qself else {
+        return static_receiver_type(&expr.path);
+    };
+    let syn::Type::Path(ty) = &*qself.ty else {
+        return None;
+    };
+    if ty.qself.is_some() {
+        return None;
+    }
+    let name = ty.path.segments.last()?.ident.to_string();
+    name.chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+        .then_some(name)
 }
 
 
