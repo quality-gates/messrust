@@ -5,7 +5,8 @@ use crate::ruleset::LoadedRule;
 
 use crate::analyze::helpers::{
     format_message, func_violation, is_getter_name, is_pascal_case, is_upper_case, length_without,
-    name_violation, property_bool, property_list, property_usize, type_violation,
+    name_after_raw_prefix, name_violation, property_bool, property_list, property_usize,
+    type_violation,
 };
 use crate::analyze::model::FileModel;
 
@@ -25,17 +26,18 @@ pub(crate) fn apply_short_class_name(
     let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
     let exceptions = property_list(rule, "exceptions");
     for t in &model.types {
-        if t.name.chars().count() >= minimum {
+        let name = name_after_raw_prefix(&t.name);
+        if name.chars().count() >= minimum {
             continue;
         }
-        if exceptions.iter().any(|e| e == &t.name) {
+        if exceptions.iter().any(|e| e == name) {
             continue;
         }
         out.push(type_violation(
             rule,
             file,
             t,
-            format_message(&rule.message, &[&t.name, &minimum.to_string()]),
+            format_message(&rule.message, &[name, &minimum.to_string()]),
         ));
     }
 }
@@ -51,7 +53,8 @@ pub(crate) fn apply_long_class_name(
     let prefixes = property_list(rule, "subtract-prefixes");
     let suffixes = property_list(rule, "subtract-suffixes");
     for t in &model.types {
-        let effective = length_without(&t.name, &prefixes, &suffixes);
+        let name = name_after_raw_prefix(&t.name);
+        let effective = length_without(name, &prefixes, &suffixes);
         if effective <= maximum {
             continue;
         }
@@ -59,7 +62,7 @@ pub(crate) fn apply_long_class_name(
             rule,
             file,
             t,
-            format_message(&rule.message, &[&t.name, &maximum.to_string()]),
+            format_message(&rule.message, &[name, &maximum.to_string()]),
         ));
     }
 }
@@ -74,17 +77,18 @@ pub(crate) fn apply_short_variable(
     let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
     let exceptions = property_list(rule, "exceptions");
     for v in &model.variables {
-        if v.name.chars().count() >= minimum {
+        let name = name_after_raw_prefix(&v.name);
+        if name.chars().count() >= minimum {
             continue;
         }
-        if exceptions.iter().any(|e| e == &v.name) {
+        if exceptions.iter().any(|e| e == name) {
             continue;
         }
         out.push(name_violation(
             rule,
             file,
             v.begin_line,
-            format_message(&rule.message, &[&v.name, &minimum.to_string()]),
+            format_message(&rule.message, &[name, &minimum.to_string()]),
         ));
     }
 }
@@ -100,7 +104,8 @@ pub(crate) fn apply_long_variable(
     let prefixes = property_list(rule, "subtract-prefixes");
     let suffixes = property_list(rule, "subtract-suffixes");
     for v in &model.variables {
-        let effective = length_without(&v.name, &prefixes, &suffixes);
+        let name = name_after_raw_prefix(&v.name);
+        let effective = length_without(name, &prefixes, &suffixes);
         if effective <= maximum {
             continue;
         }
@@ -108,7 +113,7 @@ pub(crate) fn apply_long_variable(
             rule,
             file,
             v.begin_line,
-            format_message(&rule.message, &[&v.name, &maximum.to_string()]),
+            format_message(&rule.message, &[name, &maximum.to_string()]),
         ));
     }
 }
@@ -123,10 +128,11 @@ pub(crate) fn apply_short_method_name(
     let minimum = property_usize(rule, "minimum", DEFAULT_SHORT_NAME);
     let exceptions = property_list(rule, "exceptions");
     for f in &model.functions {
-        if f.name.chars().count() >= minimum {
+        let name = name_after_raw_prefix(&f.name);
+        if name.chars().count() >= minimum {
             continue;
         }
-        if exceptions.iter().any(|e| e == &f.name) {
+        if exceptions.iter().any(|e| e == name) {
             continue;
         }
         let parent = f.parent.as_deref().unwrap_or("");
@@ -134,7 +140,7 @@ pub(crate) fn apply_short_method_name(
             rule,
             file,
             f,
-            format_message(&rule.message, &[parent, &f.name, &minimum.to_string()]),
+            format_message(&rule.message, &[parent, name, &minimum.to_string()]),
         ));
     }
 }
@@ -180,7 +186,8 @@ pub(crate) fn apply_boolean_get_method_name(
 ) {
     let check_parameterized = property_bool(rule, "checkParameterizedMethods", false);
     for f in &model.functions {
-        if !is_getter_name(&f.name) || !f.returns_bool {
+        let name = name_after_raw_prefix(&f.name);
+        if !is_getter_name(name) || !f.returns_bool {
             continue;
         }
         if !check_parameterized && f.param_count > 0 {
@@ -190,7 +197,7 @@ pub(crate) fn apply_boolean_get_method_name(
             rule,
             file,
             f,
-            format_message(&rule.message, &[&f.name]),
+            format_message(&rule.message, &[name]),
         ));
     }
 }

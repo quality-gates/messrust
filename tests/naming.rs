@@ -1167,3 +1167,93 @@ fn boolean_get_method_name_reports_method_with_typed_self() {
         "The 'get_active()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
     );
 }
+
+#[test]
+fn naming_rules_measure_raw_identifiers_without_r_hash_prefix() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw.rs",
+        r##"pub fn test() {
+    let r#in = 1;
+    let _ = r#in;
+
+    let r#nineteen_chars_long = 1;
+    let _ = r#nineteen_chars_long;
+}
+
+pub struct r#As;
+
+pub trait Service {
+    fn r#do(&self);
+    fn r#get_active(&self) -> bool;
+}
+"##,
+    );
+    let (code, out, err) = run_only(
+        &path,
+        "ShortVariable,LongVariable,ShortClassName,ShortMethodName,BooleanGetMethodName",
+    );
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "ShortVariable",
+        "Avoid variables with short names like in. Configured minimum length is 3.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        9,
+        "ShortClassName",
+        "Avoid types with short names like As. Configured minimum length is 3.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        12,
+        "ShortMethodName",
+        "Avoid using short method names like Service::do(). The configured minimum method name length is 3.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        13,
+        "BooleanGetMethodName",
+        "The 'get_active()' method which returns a boolean should be named 'is_...()' or 'has_...()'",
+    );
+    assert!(!out.contains("LongVariable"), "stdout={out:?}");
+    assert!(!out.contains("r#"), "stdout={out:?}");
+}
+
+#[test]
+fn long_class_name_measures_raw_identifier_without_r_hash_prefix() {
+    let dir = TempDir::new().unwrap();
+    // 40 characters after `r#`: at the default maximum, so not reported.
+    let name = format!("r#{}", "A".repeat(40));
+    let path = write_file(dir.path(), "raw_long.rs", &format!("pub struct {name};\n"));
+    let (code, out, err) = run_only(&path, "LongClassName");
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+}
+
+#[test]
+fn short_name_exceptions_match_raw_identifier_without_r_hash_prefix() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "raw_exc.rs", "pub struct r#As;\n");
+    let ruleset = write_file(
+        dir.path(),
+        "rs.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="t">
+    <rule ref="naming/ShortClassName">
+        <properties>
+            <property name="exceptions" value="As" />
+        </properties>
+    </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", ruleset.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
+}

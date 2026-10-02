@@ -174,7 +174,7 @@ pub(crate) fn length_without(name: &str, prefixes: &[String], suffixes: &[String
 }
 
 
-fn name_after_raw_prefix(name: &str) -> &str {
+pub(crate) fn name_after_raw_prefix(name: &str) -> &str {
     name.strip_prefix("r#").unwrap_or(name)
 }
 
