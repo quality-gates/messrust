@@ -776,6 +776,29 @@ impl StaticMutCollector {
         });
     }
 
+    /// Records a `static mut` declared in a block. The key holds the
+    /// declaration position, so it cannot match a module-level static.
+    fn record_block_static(&mut self, node: &syn::ItemStatic, local: &mut HashMap<String, String>) {
+        if matches!(node.mutability, syn::StaticMutability::None) {
+            return;
+        }
+        let name = node.ident.to_string();
+        let start = node.ident.span().start();
+        let key = format!(
+            "{}#{}:{}",
+            qualified_name(&self.scope, &name),
+            start.line,
+            start.column
+        );
+        self.declared.insert(key.clone());
+        local.insert(name.clone(), key.clone());
+        self.static_muts.push(StaticMutSite {
+            key,
+            name,
+            begin_line: start.line,
+        });
+    }
+
     fn record_use(&mut self, node: &syn::ItemUse) {
         let bindings = self.bindings_in_use(node);
         self.imports
@@ -879,10 +902,15 @@ impl<'ast> Visit<'ast> for StaticMutCollector {
     fn visit_block(&mut self, node: &'ast syn::Block) {
         let mut local = HashMap::new();
         for stmt in &node.stmts {
-            let syn::Stmt::Item(Item::Use(use_item)) = stmt else {
-                continue;
-            };
-            local.extend(self.bindings_in_use(use_item));
+            match stmt {
+                syn::Stmt::Item(Item::Use(use_item)) => {
+                    local.extend(self.bindings_in_use(use_item));
+                }
+                syn::Stmt::Item(Item::Static(static_item)) => {
+                    self.record_block_static(static_item, &mut local);
+                }
+                _ => {}
+            }
         }
         self.block_imports.push(local);
         syn::visit::visit_block(self, node);
