@@ -453,6 +453,39 @@ fn main() {
 }
 
 #[test]
+fn short_variable_reports_bindings_inside_at_subpatterns() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "subpat.rs",
+        r#"
+pub fn test(opt: Option<i32>, pair: (i32, i32)) {
+    if let outer @ Some(x) = opt {
+        let _ = (outer, x);
+    }
+    let whole @ (ab, cd) = pair;
+    let _ = (whole, ab, cd);
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "ShortVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(!out.contains("like outer."), "outer quiet: stdout={out:?}");
+    assert!(!out.contains("like whole."), "whole quiet: stdout={out:?}");
+    for (line, name) in [(3, "x"), (6, "ab"), (6, "cd")] {
+        assert_finding(
+            &out,
+            &path,
+            line,
+            "ShortVariable",
+            &format!(
+                "Avoid variables with short names like {name}. Configured minimum length is 3."
+            ),
+        );
+    }
+}
+
+#[test]
 fn short_variable_boundary_allows_exact_minimum() {
     let dir = TempDir::new().unwrap();
     // `abc` length 3 == minimum → allowed; `ab` length 2 → reported after.
@@ -657,6 +690,31 @@ fn main() {
         &out,
         &path,
         6,
+        "LongVariable",
+        "Avoid excessively long variable names like other_really_long_name. Keep variable name length under 20.",
+    );
+}
+
+#[test]
+fn long_variable_reports_bindings_inside_at_subpatterns() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "subpat.rs",
+        r#"
+pub fn test(opt: Option<i32>) {
+    if let outer @ Some(other_really_long_name) = opt {
+        let _ = (outer, other_really_long_name);
+    }
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "LongVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
         "LongVariable",
         "Avoid excessively long variable names like other_really_long_name. Keep variable name length under 20.",
     );

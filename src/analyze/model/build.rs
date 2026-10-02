@@ -79,6 +79,9 @@ impl<'ast> Visit<'ast> for BindingCollector {
                 begin_line: node.ident.span().start().line,
             });
         }
+        if let Some((_, sub)) = &node.subpat {
+            self.visit_pat(sub);
+        }
     }
 
     fn visit_field(&mut self, node: &'ast syn::Field) {
