@@ -592,6 +592,56 @@ fn static_access_prefers_rightmost_pascal_receiver() {
 }
 
 #[test]
+fn static_access_reports_qualified_self_type_call() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "qself.rs",
+        "struct Helper;\nimpl Helper {\n    pub fn make() {}\n}\n\nstruct Worker;\nimpl Worker {\n    pub fn run(&self) {\n        <Helper>::make();\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        9,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'run'.",
+    );
+}
+
+#[test]
+fn static_access_reports_qualified_trait_cast_call() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "qself_trait.rs",
+        "trait Make {\n    fn make();\n}\nstruct Helper;\nimpl Make for Helper {\n    fn make() {}\n}\nstruct Worker;\nimpl Worker {\n    pub fn run(&self) {\n        <Helper as Make>::make();\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        11,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'run'.",
+    );
+}
+
+#[test]
+fn static_access_allows_qualified_self_and_enclosing_type() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "qself_self.rs",
+        "struct Worker;\nimpl Worker {\n    fn make() {}\n    fn run(&self) {\n        <Self>::make();\n        <Worker>::make();\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
 fn duplicated_array_key_reports_duplicate_in_nested_struct_literal() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
