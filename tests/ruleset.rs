@@ -178,6 +178,55 @@ fn relative_ref_to_sibling_xml_resolves_against_the_referencing_file() {
 }
 
 #[test]
+fn sibling_ref_with_a_builtin_name_loads_the_sibling_file() {
+    // A <rule ref="naming.xml"/> must load naming.xml beside the referencing
+    // file before the built-in naming set.
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "a.rs", "struct A;\nfn f() { let x = 1; }\n");
+    write_file(
+        dir.path(),
+        "cfg/naming.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="CustomNaming">
+  <rule name="LongClassName"
+        message="Avoid long type names: {0}"
+        class="PHPMD\Rule\Naming\LongClassName">
+    <properties>
+      <property name="maximum" value="0"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let parent = write_file(
+        dir.path(),
+        "cfg/main.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="Main">
+  <rule ref="naming.xml"/>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", parent.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert!(out.contains("LongClassName"), "stdout={out:?}");
+    assert!(!out.contains("ShortClassName"), "stdout={out:?}");
+    assert!(!out.contains("ShortVariable"), "stdout={out:?}");
+}
+
+#[test]
+fn missing_ruleset_path_with_a_builtin_file_name_is_an_error() {
+    // custom/naming.xml does not exist; it must not load the built-in set.
+    let dir = TempDir::new().unwrap();
+    let source = write_file(dir.path(), "a.rs", "struct A;\n");
+    let missing = dir.path().join("custom").join("naming.xml");
+    let (code, out, err) = run_cli(&[source.to_str().unwrap(), "text", missing.to_str().unwrap()]);
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("unknown ruleset or file"), "stderr={err:?}");
+}
+
+#[test]
 fn relative_ref_in_subdirectory_resolves_against_the_referencing_file() {
     // A ref may name a file inside a sub-directory of the referencing
     // ruleset, and refs inside that referenced file must resolve against

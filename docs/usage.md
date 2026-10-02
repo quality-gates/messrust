@@ -142,7 +142,10 @@ messrust src text path/to/team-policy.xml --ignore-tests
 ```
 
 References may name a built-in, one rule, `rulesets/name.xml`, or another XML
-file relative to the current file. Rulesets can nest. Later references override
+file relative to the current file. A ruleset name or reference selects a file
+beside the current file first, then a file at the given path, then a built-in.
+A missing path is an error, also when its file name is a built-in name.
+Rulesets can nest. Later references override
 earlier priority and property values. `<exclude name="..."/>` removes a rule
 from the referenced set.
 
