@@ -146,6 +146,9 @@ fn record_request() {
 }
 ```
 
+A `static mut` declared inside a function or method body also counts: its
+storage lives for the whole program.
+
 Immutable `static` and `const` never fire. By default an unmodified `static mut`
 is also quiet; set `report-immutable=true` to report every `static mut`
 declaration.

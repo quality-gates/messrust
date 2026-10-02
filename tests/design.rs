@@ -1061,6 +1061,113 @@ fn global_variable_report_immutable_flags_unmutated_static_mut() {
 }
 
 #[test]
+fn global_variable_reports_mutated_static_mut_declared_in_fn_and_method() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fn_static.rs",
+        "fn bump() {\n    static mut COUNT: usize = 0;\n    unsafe {\n        COUNT += 1;\n    }\n}\n\nstruct Worker;\nimpl Worker {\n    fn run(&self) {\n        static mut JOBS: usize = 0;\n        unsafe {\n            JOBS += 1;\n        }\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNT.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        11,
+        "GlobalVariable",
+        "Avoid using static mutable state: JOBS.",
+    );
+}
+
+#[test]
+fn global_variable_fn_local_static_mut_shadows_module_static_mut() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "shadow.rs",
+        "static mut COUNT: usize = 0;\nfn bump() {\n    static mut COUNT: usize = 0;\n    unsafe {\n        COUNT += 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        3,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNT.",
+    );
+    let loc = format!("{}:1", path.display());
+    assert!(
+        !out.contains(&loc),
+        "unexpected module-level finding in stdout={out:?}"
+    );
+}
+
+#[test]
+fn global_variable_report_immutable_flags_unmutated_fn_local_static_mut() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "imm_fn.rs",
+        "fn read() -> usize {\n    static mut UNUSED: usize = 0;\n    unsafe { UNUSED }\n}\n",
+    );
+    let xml = write_ruleset(
+        dir.path(),
+        "gv.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="gv">
+  <rule ref="design/GlobalVariable">
+    <properties>
+      <property name="report-immutable" value="true"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_finding(
+        &out,
+        &path,
+        2,
+        "GlobalVariable",
+        "Avoid using static mutable state: UNUSED.",
+    );
+}
+
+#[test]
+fn global_variable_report_immutable_skips_fn_local_immutable_static() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "imm_plain.rs",
+        "fn read() -> usize {\n    static LIMIT: usize = 0;\n    LIMIT\n}\n",
+    );
+    let xml = write_ruleset(
+        dir.path(),
+        "gv.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" ?>
+<ruleset name="gv">
+  <rule ref="design/GlobalVariable">
+    <properties>
+      <property name="report-immutable" value="true"/>
+    </properties>
+  </rule>
+</ruleset>
+"#,
+    );
+    let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", xml.to_str().unwrap()]);
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+}
+
+#[test]
 fn lack_of_cohesion_reports_disjoint_method_groups() {
     let dir = TempDir::new().unwrap();
     let path = write_file(
