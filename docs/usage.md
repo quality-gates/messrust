@@ -178,5 +178,6 @@ Malformed directives are ignored. Normal reports omit suppressed findings;
 
 ## Exploratory testing
 
+- [2026-10-03 report](exploratory-testing/2026-10-03-messrust/REPORT.md)
 - [2026-09-26 report](exploratory-testing/2026-09-26-messrust/REPORT.md)
 

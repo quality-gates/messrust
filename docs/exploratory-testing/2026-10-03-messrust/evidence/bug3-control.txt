@@ -1,0 +1,5 @@
+/et/fixtures/bug3_control.rs:6   ImplicitInput   The function 'test_inputs' has an implicit input: it calls 'File::open'.
+/et/fixtures/bug3_control.rs:7   ImplicitInput   The function 'test_inputs' has an implicit input: it calls 'Instant::now'.
+/et/fixtures/bug3_control.rs:11  ImplicitOutput  The function 'test_outputs' has an implicit output: it calls 'File::create'.
+/et/fixtures/bug3_control.rs:12  ImplicitOutput  The function 'test_outputs' has an implicit output: it calls 'Command::new'.
+[exit=2]

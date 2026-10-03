@@ -1,0 +1,6 @@
+/et/fixtures/service.rs:4   [33mUnusedPrivateField[0m       [31mAvoid unused private fields such as 'c'.[0m
+/et/fixtures/service.rs:5   [33mUnusedPrivateField[0m       [31mAvoid unused private fields such as 'd'.[0m
+/et/fixtures/service.rs:10  [33mDevelopmentCodeFragment[0m  [31mThe method Service::do_work() calls the typical debug function println() which is mostly only used during development.[0m
+/et/fixtures/service.rs:12  [33mUnusedLocalVariable[0m      [31mAvoid unused local variables such as 'unused_val'.[0m
+/et/fixtures/service.rs:14  [33mUnusedLocalVariable[0m      [31mAvoid unused local variables such as 'other'.[0m
+/et/fixtures/service.rs:18  [33mExcessiveParameterList[0m   [31mThe method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10.[0m

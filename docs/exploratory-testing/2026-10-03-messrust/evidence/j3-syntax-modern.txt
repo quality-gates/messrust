@@ -1,0 +1,7 @@
+/et/fixtures/syntax_modern.rs:3   ShortVariable            Avoid variables with short names like x. Configured minimum length is 3.
+/et/fixtures/syntax_modern.rs:6   ShortVariable            Avoid variables with short names like p. Configured minimum length is 3.
+/et/fixtures/syntax_modern.rs:11  DevelopmentCodeFragment  The function test_modern() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/syntax_modern.rs:15  DevelopmentCodeFragment  The function test_modern() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/syntax_modern.rs:21  DevelopmentCodeFragment  The function test_modern() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/syntax_modern.rs:24  DevelopmentCodeFragment  The function test_modern() calls the typical debug function println() which is mostly only used during development.
+[exit=2]

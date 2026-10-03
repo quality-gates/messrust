@@ -1,0 +1,2 @@
+/et/fixtures/suppression.rs:6  DevelopmentCodeFragment [suppressed]  The method SuppressedDemo::run() calls the typical debug function println() which is mostly only used during development.
+[exit=2]

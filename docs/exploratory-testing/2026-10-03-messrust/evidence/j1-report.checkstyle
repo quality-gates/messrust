@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="0.1.16">
+  <file name="/et/fixtures/service.rs">
+    <error line="4" column="1" severity="warning" message="Avoid unused private fields such as &#039;c&#039;." source="Unused Code Rules/UnusedPrivateField"/>
+    <error line="5" column="1" severity="warning" message="Avoid unused private fields such as &#039;d&#039;." source="Unused Code Rules/UnusedPrivateField"/>
+    <error line="10" column="1" severity="error" message="The method Service::do_work() calls the typical debug function println() which is mostly only used during development." source="Design Rules/DevelopmentCodeFragment"/>
+    <error line="12" column="1" severity="warning" message="Avoid unused local variables such as &#039;unused_val&#039;." source="Unused Code Rules/UnusedLocalVariable"/>
+    <error line="14" column="1" severity="warning" message="Avoid unused local variables such as &#039;other&#039;." source="Unused Code Rules/UnusedLocalVariable"/>
+    <error line="18" column="1" severity="warning" message="The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10." source="Code Size Rules/ExcessiveParameterList"/>
+  </file>
+</checkstyle>
