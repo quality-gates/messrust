@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<pmd version="0.1.16" tool="messrust" timestamp="2026-10-03T00:30:33Z">
+  <file name="/et/fixtures/service.rs">
+    <violation beginline="4" endline="4" rule="UnusedPrivateField" ruleset="Unused Code Rules" priority="3" suppressed="false">
+      Avoid unused private fields such as &#039;c&#039;.
+    </violation>
+    <violation beginline="5" endline="5" rule="UnusedPrivateField" ruleset="Unused Code Rules" priority="3" suppressed="false">
+      Avoid unused private fields such as &#039;d&#039;.
+    </violation>
+    <violation beginline="10" endline="10" rule="DevelopmentCodeFragment" ruleset="Design Rules" priority="2" suppressed="false">
+      The method Service::do_work() calls the typical debug function println() which is mostly only used during development.
+    </violation>
+    <violation beginline="12" endline="12" rule="UnusedLocalVariable" ruleset="Unused Code Rules" priority="3" suppressed="false">
+      Avoid unused local variables such as &#039;unused_val&#039;.
+    </violation>
+    <violation beginline="14" endline="14" rule="UnusedLocalVariable" ruleset="Unused Code Rules" priority="3" suppressed="false">
+      Avoid unused local variables such as &#039;other&#039;.
+    </violation>
+    <violation beginline="18" endline="32" rule="ExcessiveParameterList" ruleset="Code Size Rules" class="Service" method="long_param_list" priority="3" suppressed="false">
+      The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10.
+    </violation>
+  </file>
+</pmd>

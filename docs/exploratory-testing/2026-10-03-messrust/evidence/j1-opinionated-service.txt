@@ -1,0 +1,23 @@
+/et/fixtures/service.rs:2   ShortVariable            Avoid variables with short names like a. Configured minimum length is 3.
+/et/fixtures/service.rs:3   ShortVariable            Avoid variables with short names like b. Configured minimum length is 3.
+/et/fixtures/service.rs:4   UnusedPrivateField       Avoid unused private fields such as 'c'.
+/et/fixtures/service.rs:4   ShortVariable            Avoid variables with short names like c. Configured minimum length is 3.
+/et/fixtures/service.rs:5   UnusedPrivateField       Avoid unused private fields such as 'd'.
+/et/fixtures/service.rs:5   ShortVariable            Avoid variables with short names like d. Configured minimum length is 3.
+/et/fixtures/service.rs:9   BooleanArgumentFlag      The method Service::do_work has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.
+/et/fixtures/service.rs:10  DevelopmentCodeFragment  The method Service::do_work() calls the typical debug function println() which is mostly only used during development.
+/et/fixtures/service.rs:12  UnusedLocalVariable      Avoid unused local variables such as 'unused_val'.
+/et/fixtures/service.rs:13  ElseExpression           The method do_work uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them.
+/et/fixtures/service.rs:14  UnusedLocalVariable      Avoid unused local variables such as 'other'.
+/et/fixtures/service.rs:18  ExcessiveParameterList   The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10.
+/et/fixtures/service.rs:20  ShortVariable            Avoid variables with short names like p1. Configured minimum length is 3.
+/et/fixtures/service.rs:21  ShortVariable            Avoid variables with short names like p2. Configured minimum length is 3.
+/et/fixtures/service.rs:22  ShortVariable            Avoid variables with short names like p3. Configured minimum length is 3.
+/et/fixtures/service.rs:23  ShortVariable            Avoid variables with short names like p4. Configured minimum length is 3.
+/et/fixtures/service.rs:24  ShortVariable            Avoid variables with short names like p5. Configured minimum length is 3.
+/et/fixtures/service.rs:25  ShortVariable            Avoid variables with short names like p6. Configured minimum length is 3.
+/et/fixtures/service.rs:26  ShortVariable            Avoid variables with short names like p7. Configured minimum length is 3.
+/et/fixtures/service.rs:27  ShortVariable            Avoid variables with short names like p8. Configured minimum length is 3.
+/et/fixtures/service.rs:28  ShortVariable            Avoid variables with short names like p9. Configured minimum length is 3.
+/et/fixtures/service.rs:35  StaticAccess             Avoid using static access to class 'Other' in method 'call_external'.
+[exit=2]

@@ -1,0 +1,3 @@
+/et/fixtures/bug2_control.rs:5  StaticAccess  Avoid using static access to class 'Service' in method 'test_path'.
+/et/fixtures/bug2_control.rs:9  StaticAccess  Avoid using static access to class 'Helper' in method 'test_qualified'.
+[exit=2]

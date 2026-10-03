@@ -1,0 +1,96 @@
+{
+    "version": "0.1.16",
+    "package": "messrust",
+    "timestamp": "2026-10-03T00:30:37Z",
+    "files": [
+        {
+            "file": "/et/fixtures/service.rs",
+            "violations": [
+                {
+                    "beginLine": 4,
+                    "endLine": 4,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused private fields such as 'c'.",
+                    "rule": "UnusedPrivateField",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 5,
+                    "endLine": 5,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused private fields such as 'd'.",
+                    "rule": "UnusedPrivateField",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 10,
+                    "endLine": 10,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "The method Service::do_work() calls the typical debug function println() which is mostly only used during development.",
+                    "rule": "DevelopmentCodeFragment",
+                    "ruleSet": "Design Rules",
+                    "externalInfoUrl": "",
+                    "priority": 2,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 12,
+                    "endLine": 12,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'unused_val'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 14,
+                    "endLine": 14,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'other'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 18,
+                    "endLine": 32,
+                    "package": "",
+                    "function": "",
+                    "class": "Service",
+                    "method": "long_param_list",
+                    "description": "The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10.",
+                    "rule": "ExcessiveParameterList",
+                    "ruleSet": "Code Size Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                }
+            ]
+        }
+    ]
+}

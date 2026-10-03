@@ -1,0 +1,2 @@
+error: no rules were loaded from the specified rulesets
+[exit=1]

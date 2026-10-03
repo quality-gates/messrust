@@ -1,0 +1,2 @@
+/et/fixtures/params_test.rs:5  ExcessiveParameterList  The function five_params has 5 parameters. Consider reducing the number of parameters to less than 4.
+[exit=2]

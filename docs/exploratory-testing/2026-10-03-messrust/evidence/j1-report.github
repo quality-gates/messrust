@@ -1,0 +1,6 @@
+::warning file=/et/fixtures/service.rs,line=4,col=1::Avoid unused private fields such as 'c'. (UnusedPrivateField)
+::warning file=/et/fixtures/service.rs,line=5,col=1::Avoid unused private fields such as 'd'. (UnusedPrivateField)
+::warning file=/et/fixtures/service.rs,line=10,col=1::The method Service::do_work() calls the typical debug function println() which is mostly only used during development. (DevelopmentCodeFragment)
+::warning file=/et/fixtures/service.rs,line=12,col=1::Avoid unused local variables such as 'unused_val'. (UnusedLocalVariable)
+::warning file=/et/fixtures/service.rs,line=14,col=1::Avoid unused local variables such as 'other'. (UnusedLocalVariable)
+::warning file=/et/fixtures/service.rs,line=18,col=1::The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10. (ExcessiveParameterList)

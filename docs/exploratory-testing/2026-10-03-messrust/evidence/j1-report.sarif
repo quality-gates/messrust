@@ -1,0 +1,190 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 4,
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Avoid unused private fields such as 'c'."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "UnusedPrivateField"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 5,
+                  "startLine": 5
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Avoid unused private fields such as 'd'."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "UnusedPrivateField"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 10,
+                  "startLine": 10
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The method Service::do_work() calls the typical debug function println() which is mostly only used during development."
+          },
+          "properties": {
+            "priority": 2,
+            "suppressed": false
+          },
+          "ruleId": "DevelopmentCodeFragment"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 12,
+                  "startLine": 12
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Avoid unused local variables such as 'unused_val'."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "UnusedLocalVariable"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 14,
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Avoid unused local variables such as 'other'."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "UnusedLocalVariable"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/et/fixtures/service.rs"
+                },
+                "region": {
+                  "endLine": 32,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10."
+          },
+          "properties": {
+            "priority": 3,
+            "suppressed": false
+          },
+          "ruleId": "ExcessiveParameterList"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "messrust",
+          "rules": [
+            {
+              "id": "UnusedPrivateField",
+              "name": "UnusedPrivateField",
+              "shortDescription": {
+                "text": "UnusedPrivateField"
+              }
+            },
+            {
+              "id": "DevelopmentCodeFragment",
+              "name": "DevelopmentCodeFragment",
+              "shortDescription": {
+                "text": "DevelopmentCodeFragment"
+              }
+            },
+            {
+              "id": "UnusedLocalVariable",
+              "name": "UnusedLocalVariable",
+              "shortDescription": {
+                "text": "UnusedLocalVariable"
+              }
+            },
+            {
+              "id": "ExcessiveParameterList",
+              "name": "ExcessiveParameterList",
+              "shortDescription": {
+                "text": "ExcessiveParameterList"
+              }
+            }
+          ],
+          "version": "0.1.16"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

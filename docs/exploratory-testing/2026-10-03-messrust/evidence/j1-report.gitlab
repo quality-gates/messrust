@@ -1,0 +1,86 @@
+[
+    {
+        "type": "issue",
+        "check_name": "UnusedPrivateField",
+        "description": "Avoid unused private fields such as 'c'.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a343a556e75736564507269766174654669656c64",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 4
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "UnusedPrivateField",
+        "description": "Avoid unused private fields such as 'd'.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a353a556e75736564507269766174654669656c64",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 5
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "DevelopmentCodeFragment",
+        "description": "The method Service::do_work() calls the typical debug function println() which is mostly only used during development.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a31303a446576656c6f706d656e74436f6465467261676d656e74",
+        "severity": "critical",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 10
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "UnusedLocalVariable",
+        "description": "Avoid unused local variables such as 'unused_val'.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a31323a556e757365644c6f63616c5661726961626c65",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 12
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "UnusedLocalVariable",
+        "description": "Avoid unused local variables such as 'other'.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a31343a556e757365644c6f63616c5661726961626c65",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 14
+            }
+        }
+    },
+    {
+        "type": "issue",
+        "check_name": "ExcessiveParameterList",
+        "description": "The method long_param_list has 10 parameters. Consider reducing the number of parameters to less than 10.",
+        "fingerprint": "2f65742f66697874757265732f736572766963652e72733a31383a457863657373697665506172616d657465724c697374",
+        "severity": "major",
+        "suppressed": false,
+        "location": {
+            "path": "/et/fixtures/service.rs",
+            "lines": {
+                "begin": 18
+            }
+        }
+    }
+]
