@@ -642,6 +642,48 @@ fn static_access_allows_qualified_self_and_enclosing_type() {
 }
 
 #[test]
+fn static_access_reports_raw_identifier_type_calls_but_skips_module_calls() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_static.rs",
+        r#"pub struct r#Service;
+pub struct r#Helper;
+
+pub fn test_path() {
+    r#Service::run();
+}
+
+pub fn test_qualified() {
+    <r#Helper>::run();
+}
+
+pub fn test_module() {
+    r#mod_name::func();
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "StaticAccess");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        5,
+        "StaticAccess",
+        "Avoid using static access to class 'Service' in method 'test_path'.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        9,
+        "StaticAccess",
+        "Avoid using static access to class 'Helper' in method 'test_qualified'.",
+    );
+    assert_eq!(out.matches("StaticAccess").count(), 2, "stdout={out:?}");
+    assert!(!out.contains("mod_name"), "stdout={out:?}");
+}
+
+#[test]
 fn duplicated_array_key_reports_duplicate_in_nested_struct_literal() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

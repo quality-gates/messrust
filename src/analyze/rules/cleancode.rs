@@ -8,8 +8,8 @@ use crate::report::Violation;
 use crate::ruleset::LoadedRule;
 
 use crate::analyze::helpers::{
-    compile_phpmd_regex, format_message, ignored_name, is_rust_unused_name, name_violation,
-    property_list,
+    compile_phpmd_regex, format_message, ignored_name, is_rust_unused_name, name_after_raw_prefix,
+    name_violation, property_list,
 };
 use crate::analyze::model::FileModel;
 
@@ -322,10 +322,11 @@ pub(crate) fn static_call_receiver(expr: &syn::ExprPath) -> Option<String> {
         return None;
     }
     let name = ty.path.segments.last()?.ident.to_string();
+    let name = name_after_raw_prefix(&name);
     name.chars()
         .next()
         .is_some_and(|c| c.is_ascii_uppercase())
-        .then_some(name)
+        .then_some(name.to_string())
 }
 
 
@@ -337,8 +338,9 @@ pub(crate) fn static_receiver_type(path: &syn::Path) -> Option<String> {
     let _method = segs.next_back()?;
     for seg in segs.rev() {
         let name = seg.ident.to_string();
+        let name = name_after_raw_prefix(&name);
         if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-            return Some(name);
+            return Some(name.to_string());
         }
     }
     None
