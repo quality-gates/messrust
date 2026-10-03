@@ -788,6 +788,76 @@ fn global_variable_reports_mutated_static_mut() {
 }
 
 #[test]
+fn global_variable_reports_static_mut_written_through_raw_address() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_static.rs",
+        "static mut COUNTER: i32 = 0;\n\npub fn step() {\n    unsafe {\n        *&raw mut COUNTER = 42;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNTER.",
+    );
+}
+
+#[test]
+fn global_variable_reports_static_mut_written_through_parenthesized_raw_address() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_paren.rs",
+        "static mut COUNTER: i32 = 0;\n\npub fn step() {\n    unsafe {\n        *(&raw mut COUNTER) = 43;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNTER.",
+    );
+}
+
+#[test]
+fn global_variable_reports_static_mut_compound_assigned_through_raw_address() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_compound.rs",
+        "static mut COUNTER: i32 = 0;\n\npub fn step() {\n    unsafe {\n        *&raw mut COUNTER += 1;\n    }\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        1,
+        "GlobalVariable",
+        "Avoid using static mutable state: COUNTER.",
+    );
+}
+
+#[test]
+fn global_variable_stays_quiet_for_static_mut_read_through_raw_const() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "raw_const.rs",
+        "static mut COUNTER: i32 = 0;\n\npub fn read() -> i32 {\n    let value;\n    unsafe {\n        value = *&raw const COUNTER;\n    }\n    value\n}\n",
+    );
+    let (code, out, err) = run_only(&path, "GlobalVariable");
+    assert_eq!(code, EXIT_SUCCESS, "stderr={err:?} stdout={out:?}");
+    assert!(!out.contains("GlobalVariable"), "stdout={out:?}");
+}
+
+#[test]
 fn global_variable_reports_static_mut_written_through_use_import() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

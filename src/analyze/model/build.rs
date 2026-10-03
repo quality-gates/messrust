@@ -1057,29 +1057,35 @@ fn collect_mutated_static_place(
     declared: &HashSet<String>,
     mutated: &mut HashSet<String>,
 ) {
-    match expr {
-        syn::Expr::Path(p) => {
-            if p.qself.is_none() {
-                if let Some(key) =
-                    resolve_mutated_static_path(&p.path, scope, imports, block_imports, declared)
-                {
-                    mutated.insert(key);
-                }
+    let mut place = expr;
+    while let Some(inner) = place_base(place) {
+        place = inner;
+    }
+    if let syn::Expr::Path(p) = place {
+        if p.qself.is_none() {
+            if let Some(key) =
+                resolve_mutated_static_path(&p.path, scope, imports, block_imports, declared)
+            {
+                mutated.insert(key);
             }
         }
-        syn::Expr::Field(f) => {
-            collect_mutated_static_place(&f.base, scope, imports, block_imports, declared, mutated)
+    }
+}
+
+
+/// Returns the expression one step closer to the root of an assignment
+/// place: the base of a field or index, the inner expression of
+/// parentheses, a dereference, or a `&raw mut` address.
+fn place_base(expr: &syn::Expr) -> Option<&syn::Expr> {
+    match expr {
+        syn::Expr::Field(f) => Some(&f.base),
+        syn::Expr::Index(i) => Some(&i.expr),
+        syn::Expr::Paren(p) => Some(&p.expr),
+        syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => Some(&u.expr),
+        syn::Expr::RawAddr(r) if matches!(r.mutability, syn::PointerMutability::Mut(_)) => {
+            Some(&r.expr)
         }
-        syn::Expr::Index(i) => {
-            collect_mutated_static_place(&i.expr, scope, imports, block_imports, declared, mutated)
-        }
-        syn::Expr::Paren(p) => {
-            collect_mutated_static_place(&p.expr, scope, imports, block_imports, declared, mutated)
-        }
-        syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => {
-            collect_mutated_static_place(&u.expr, scope, imports, block_imports, declared, mutated)
-        }
-        _ => {}
+        _ => None,
     }
 }
 
