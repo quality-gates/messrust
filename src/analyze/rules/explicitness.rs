@@ -245,9 +245,9 @@ impl EffectCollector<'_> {
         }
     }
 
-    fn note_call(&mut self, path: &syn::Path) {
-        let key = last_two_segments(path);
-        let line = path.span().start().line;
+    fn note_call(&mut self, path: &syn::ExprPath) {
+        let key = call_key(path);
+        let line = path.path.span().start().line;
         if INPUT_CALLS.contains(&key.as_str()) {
             self.input(line, format!("it calls '{key}'"));
         } else if OUTPUT_CALLS.contains(&key.as_str()) {
@@ -330,7 +330,7 @@ impl<'ast> Visit<'ast> for EffectCollector<'_> {
 
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if let Expr::Path(path) = &*node.func {
-            self.note_call(&path.path);
+            self.note_call(path);
         }
         syn::visit::visit_expr_call(self, node);
     }
@@ -402,6 +402,24 @@ fn pattern_name(pat: &Pat) -> String {
     match pat {
         Pat::Ident(ident) => ident.ident.to_string(),
         _ => "_".to_string(),
+    }
+}
+
+
+/// The `Type::name` key of a call path. `<File>::open` carries `File` in
+/// `qself.ty` and only `open` in `path`.
+fn call_key(expr: &syn::ExprPath) -> String {
+    let receiver = expr
+        .qself
+        .as_ref()
+        .filter(|qself| qself.position == 0)
+        .and_then(|qself| match &*qself.ty {
+            syn::Type::Path(ty) if ty.qself.is_none() => ty.path.segments.last(),
+            _ => None,
+        });
+    match (receiver, expr.path.segments.last()) {
+        (Some(ty), Some(name)) => format!("{}::{}", ty.ident, name.ident),
+        _ => last_two_segments(&expr.path),
     }
 }
 

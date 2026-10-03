@@ -353,3 +353,63 @@ fn peek() -> u32 {\n\
         )]
     );
 }
+
+#[test]
+fn qualified_self_calls_are_implicit_inputs_and_outputs() {
+    let source = "use std::fs::File;\n\
+use std::time::Instant;\n\
+use std::process::Command;\n\
+\n\
+pub fn test_inputs() {\n\
+    let _ = <File>::open(\"input.txt\");\n\
+    let _ = <Instant>::now();\n\
+}\n\
+\n\
+pub fn test_outputs() {\n\
+    let _ = <File>::create(\"output.txt\");\n\
+    let _ = <Command>::new(\"ls\");\n\
+}\n";
+    let (code, found) = run_ruleset(source, "explicitness");
+    assert_eq!(code, EXIT_VIOLATION);
+    let input = "ImplicitInput";
+    let output = "ImplicitOutput";
+    assert_eq!(
+        found,
+        vec![
+            expect(
+                6,
+                input,
+                "The function 'test_inputs' has an implicit input: it calls 'File::open'."
+            ),
+            expect(
+                7,
+                input,
+                "The function 'test_inputs' has an implicit input: it calls 'Instant::now'."
+            ),
+            expect(
+                11,
+                output,
+                "The function 'test_outputs' has an implicit output: it calls 'File::create'."
+            ),
+            expect(
+                12,
+                output,
+                "The function 'test_outputs' has an implicit output: it calls 'Command::new'."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn qualified_self_call_with_full_type_path_uses_the_type_name() {
+    let source = "fn open() {\n    let _ = <std::fs::File>::open(\"input.txt\");\n}\n";
+    let (_, found) = run_ruleset(source, "explicitness");
+    assert_eq!(
+        found,
+        vec![expect(
+            2,
+            "ImplicitInput",
+            "The function 'open' has an implicit input: it calls 'File::open'."
+        )]
+    );
+}
