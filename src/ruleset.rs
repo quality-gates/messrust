@@ -1047,21 +1047,9 @@ impl<'a> RulesetLoader<'a> {
         }
     }
 
-    fn source(&mut self, ident: &str) -> Result<(String, String, Rc<XmlRuleset>), String> {
-        let source_id = stable_ruleset_id(ident)?;
-        if let Some(parsed) = self.expansion.parsed.get(&source_id) {
-            return Ok((source_id, ruleset_display_name(ident), Rc::clone(parsed)));
-        }
-        let (xml, display_name) = read_ruleset(ident)?;
-        let parsed = Rc::new(parse_ruleset(&xml)?);
-        self.expansion
-            .parsed
-            .insert(source_id.clone(), Rc::clone(&parsed));
-        Ok((source_id, display_name, parsed))
-    }
-
     fn load_one(&mut self, ident: &str, out: &mut Vec<LoadedRule>) -> Result<(), String> {
-        let (source_id, display_name, source) = self.source(ident)?;
+        let (source_id, display_name, source) =
+            RulesetSource::resolve(None, ident)?.load(&mut self.expansion.parsed)?;
         let set_name = ruleset_source_name(&source, &display_name);
         self.force_expand = Some(expansion_key(&source_id, ""));
         self.expand_source(out, &source_id, &source, &set_name, "")
@@ -1191,16 +1179,11 @@ impl<'a> RulesetLoader<'a> {
         rule: &XmlRule,
         base: Option<&Path>,
     ) -> Result<Option<ReferenceTarget>, String> {
-        let (ident, rule_name) = split_ref(base, &rule.ref_path);
-        let ident = resolve_ref(base, &ident);
-        let (source_id, display_name, source) = match self.source(&ident) {
-            Ok(source) => source,
-            Err(error) if is_resolvable(base, &ident) => return Err(error),
-            Err(_) => {
-                (self.warn)(format!("Cannot resolve ref: {}", rule.ref_path));
-                return Ok(None);
-            }
+        let Some((source, rule_name)) = split_ref(base, &rule.ref_path) else {
+            (self.warn)(format!("Cannot resolve ref: {}", rule.ref_path));
+            return Ok(None);
         };
+        let (source_id, display_name, source) = source.load(&mut self.expansion.parsed)?;
         let source_name = ruleset_source_name(&source, &display_name);
         Ok(Some(ReferenceTarget {
             source_id,
@@ -1660,53 +1643,78 @@ const RULE_KINDS: &[(&str, RuleKind)] = &[
     ),
 ];
 
-fn read_ruleset(ident: &str) -> Result<(String, String), String> {
-    let path = PathBuf::from(ident);
-    if path.is_file() {
-        let xml = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(ident)
-            .to_string();
-        return Ok((xml, name));
-    }
-    if let Some((xml, name)) = builtin_xml(ident) {
-        return Ok((xml.to_string(), name.to_string()));
-    }
-    Err(format!("unknown ruleset or file: {ident}"))
+/// The source that one ruleset identifier selects. `resolve` is the only
+/// function that sets the order: a file beside the referencing ruleset, then
+/// a file at the given path, then a built-in name (`naming`, `naming.xml`, or
+/// `rulesets/naming.xml`). All other missing paths are errors.
+#[derive(Debug, PartialEq)]
+enum RulesetSource {
+    File { path: PathBuf, canonical: PathBuf },
+    Builtin { key: &'static str },
 }
 
-fn stable_ruleset_id(ident: &str) -> Result<String, String> {
-    let path = PathBuf::from(ident);
-    if path.is_file() {
-        return fs::canonicalize(&path)
-            .map(|path| path.to_string_lossy().into_owned())
-            .map_err(|error| format!("{}: {error}", path.display()));
+impl RulesetSource {
+    /// `base` is the directory of the referencing file ruleset, if any.
+    fn resolve(base: Option<&Path>, ident: &str) -> Result<Self, String> {
+        let sibling = base.map(|dir| dir.join(ident));
+        for path in sibling.into_iter().chain([PathBuf::from(ident)]) {
+            if path.is_file() {
+                let canonical =
+                    fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                return Ok(Self::File { path, canonical });
+            }
+        }
+        builtin_key(ident)
+            .map(|key| Self::Builtin { key })
+            .ok_or_else(|| format!("unknown ruleset or file: {ident}"))
     }
-    if let Some(key) = normalize_builtin_key(ident) {
-        return Ok(format!("builtin:{key}"));
-    }
-    Err(format!("unknown ruleset or file: {ident}"))
-}
 
-fn ruleset_display_name(ident: &str) -> String {
-    let path = Path::new(ident);
-    if path.is_file() {
-        return path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or(ident)
-            .to_string();
+    fn source_id(&self) -> String {
+        match self {
+            Self::File { canonical, .. } => canonical.to_string_lossy().into_owned(),
+            Self::Builtin { key } => format!("builtin:{key}"),
+        }
     }
-    if let Some(key) = normalize_builtin_key(ident) {
-        return key;
+
+    fn display_name(&self) -> String {
+        match self {
+            Self::File { path, .. } => path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            Self::Builtin { key } => key.to_string(),
+        }
     }
-    Path::new(ident)
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .unwrap_or(ident)
-        .to_string()
+
+    /// Parse the source once per stable id, then reuse the parsed ruleset.
+    fn load(
+        &self,
+        parsed: &mut HashMap<String, Rc<XmlRuleset>>,
+    ) -> Result<(String, String, Rc<XmlRuleset>), String> {
+        let source_id = self.source_id();
+        let ruleset = match parsed.get(&source_id) {
+            Some(ruleset) => Rc::clone(ruleset),
+            None => {
+                let ruleset = Rc::new(parse_ruleset(&self.read()?)?);
+                parsed.insert(source_id.clone(), Rc::clone(&ruleset));
+                ruleset
+            }
+        };
+        Ok((source_id, self.display_name(), ruleset))
+    }
+
+    fn read(&self) -> Result<String, String> {
+        match self {
+            Self::File { path, .. } => {
+                fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
+            }
+            Self::Builtin { key } => Ok(BUILTIN_RULESETS
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, xml)| xml.to_string())
+                .expect("built-in key comes from BUILTIN_RULESETS")),
+        }
+    }
 }
 
 const BUILTIN_RULESETS: &[(&str, &str)] = &[
@@ -1721,42 +1729,30 @@ const BUILTIN_RULESETS: &[(&str, &str)] = &[
     ("opinionated", include_str!("../rulesets/opinionated.xml")),
 ];
 
-fn builtin_xml(ident: &str) -> Option<(&'static str, &'static str)> {
-    let key = normalize_builtin_key(ident)?;
+/// Built-in key for a bare name, `name.xml`, or `rulesets/name.xml`,
+/// compared without case.
+fn builtin_key(ident: &str) -> Option<&'static str> {
+    let lower = ident.to_ascii_lowercase().replace('\\', "/");
+    let name = lower.strip_prefix("rulesets/").unwrap_or(&lower);
+    let name = name.strip_suffix(".xml").unwrap_or(name);
     BUILTIN_RULESETS
         .iter()
-        .find(|(name, _)| *name == key)
-        .map(|(name, xml)| (*xml, *name))
+        .map(|(key, _)| *key)
+        .find(|key| *key == name)
 }
 
-fn normalize_builtin_key(ident: &str) -> Option<String> {
-    let lower = ident.to_ascii_lowercase().replace('\\', "/");
-    let base = Path::new(&lower)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&lower);
-    let stem = base.strip_suffix(".xml").unwrap_or(base);
-    match stem {
-        "codesize" | "naming" | "unusedcode" | "cleancode" | "design" | "controversial"
-        | "explicitness" | "rust" | "opinionated" => Some(stem.to_string()),
-        _ => None,
+/// Split a `<rule ref>` into its ruleset source and an optional rule name.
+fn split_ref(base: Option<&Path>, ref_str: &str) -> Option<(RulesetSource, String)> {
+    if let Ok(source) = RulesetSource::resolve(base, ref_str) {
+        return Some((source, String::new()));
     }
-}
-
-fn split_ref(base: Option<&Path>, ref_str: &str) -> (String, String) {
-    if is_resolvable(base, ref_str) {
-        return (ref_str.to_string(), String::new());
-    }
-    if let Some(idx) = ref_str.rfind('/') {
-        let base_ident = &ref_str[..idx];
-        if is_resolvable(base, base_ident) {
-            return (base_ident.to_string(), ref_str[idx + 1..].to_string());
+    if let Some((ident, rule_name)) = ref_str.rsplit_once('/') {
+        if let Ok(source) = RulesetSource::resolve(base, ident) {
+            return Some((source, rule_name.to_string()));
         }
     }
-    if let Some(ruleset) = builtin_ruleset_for_rule(ref_str) {
-        return (ruleset.to_string(), ref_str.to_string());
-    }
-    (ref_str.to_string(), String::new())
+    builtin_ruleset_for_rule(ref_str)
+        .map(|key| (RulesetSource::Builtin { key }, ref_str.to_string()))
 }
 
 /// Directory of a loaded file ruleset, from its canonical source id.
@@ -1768,17 +1764,6 @@ fn file_ruleset_dir(source_id: &str) -> Option<PathBuf> {
     } else {
         None
     }
-}
-
-/// Spell a ref ident so `is_resolvable`/`read_ruleset` see the same file
-/// the referencing ruleset sees. Idents that already resolve on their own
-/// (absolute, a file relative to the cwd, or a builtin) are unchanged.
-fn resolve_ref(base: Option<&Path>, ident: &str) -> String {
-    if base.is_none() || Path::new(ident).is_absolute() || is_resolvable(None, ident) {
-        return ident.to_string();
-    }
-    base.map(|dir| dir.join(ident).to_string_lossy().into_owned())
-        .unwrap_or_else(|| ident.to_string())
 }
 
 fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
@@ -1831,12 +1816,6 @@ fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
         "ImplicitInput" | "ImplicitOutput" => Some("explicitness"),
 
         _ => None,
-    }
-}
-
-fn is_resolvable(base: Option<&Path>, ident: &str) -> bool {
-    builtin_xml(ident).is_some() || Path::new(ident).is_file() || {
-        base.map(|dir| dir.join(ident).is_file()).unwrap_or(false)
     }
 }
 
@@ -2432,5 +2411,107 @@ mod tests {
             }
         }
         assert_eq!(count, 41, "all 41 builtin rules should be indexed");
+    }
+
+    fn file_source(path: &Path) -> RulesetSource {
+        RulesetSource::File {
+            path: path.to_path_buf(),
+            canonical: fs::canonicalize(path).unwrap(),
+        }
+    }
+
+    #[test]
+    fn sibling_file_wins_over_builtin_with_the_same_name() {
+        let dir = TempDir::new().unwrap();
+        let sibling = dir.path().join("naming.xml");
+        fs::write(&sibling, "<ruleset/>").unwrap();
+
+        let source = RulesetSource::resolve(Some(dir.path()), "naming.xml").unwrap();
+
+        assert_eq!(source, file_source(&sibling));
+    }
+
+    #[test]
+    fn sibling_file_wins_over_an_existing_given_path() {
+        // Tests run from the package root, so `rulesets/naming.xml` also
+        // exists at the given path.
+        let dir = TempDir::new().unwrap();
+        let sibling = dir.path().join("rulesets").join("naming.xml");
+        fs::create_dir_all(sibling.parent().unwrap()).unwrap();
+        fs::write(&sibling, "<ruleset/>").unwrap();
+        assert!(Path::new("rulesets/naming.xml").is_file());
+
+        let source = RulesetSource::resolve(Some(dir.path()), "rulesets/naming.xml").unwrap();
+
+        assert_eq!(source, file_source(&sibling));
+    }
+
+    #[test]
+    fn existing_given_path_resolves_to_that_file() {
+        let dir = TempDir::new().unwrap();
+        let given = dir.path().join("naming.xml");
+        fs::write(&given, "<ruleset/>").unwrap();
+
+        let source = RulesetSource::resolve(None, given.to_str().unwrap()).unwrap();
+
+        assert_eq!(source, file_source(&given));
+    }
+
+    #[test]
+    fn missing_sibling_falls_back_to_the_given_path() {
+        let base = TempDir::new().unwrap();
+        let other = TempDir::new().unwrap();
+        let given = other.path().join("policy.xml");
+        fs::write(&given, "<ruleset/>").unwrap();
+
+        let source = RulesetSource::resolve(Some(base.path()), given.to_str().unwrap()).unwrap();
+
+        assert_eq!(source, file_source(&given));
+    }
+
+    #[test]
+    fn builtin_names_resolve_to_builtins() {
+        for ident in ["naming", "Naming", "naming.xml", "RuleSets\\Naming.XML"] {
+            let source = RulesetSource::resolve(None, ident).unwrap();
+            assert_eq!(source, RulesetSource::Builtin { key: "naming" }, "{ident}");
+        }
+    }
+
+    #[test]
+    fn missing_path_with_a_builtin_file_name_is_an_error() {
+        for ident in [
+            "custom/naming.xml",
+            "C:\\x\\NAMING.XML",
+            "custom/mynaming.xml",
+        ] {
+            let error = RulesetSource::resolve(None, ident).unwrap_err();
+            assert_eq!(error, format!("unknown ruleset or file: {ident}"));
+        }
+    }
+
+    #[test]
+    fn file_source_supplies_matching_id_display_name_and_content() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("team-policy.xml");
+        fs::write(&path, "<ruleset name=\"team\"/>").unwrap();
+        let canonical = fs::canonicalize(&path).unwrap();
+
+        let source = RulesetSource::resolve(None, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(source.source_id(), canonical.to_string_lossy());
+        assert_eq!(source.display_name(), "team-policy");
+        assert_eq!(source.read().unwrap(), "<ruleset name=\"team\"/>");
+    }
+
+    #[test]
+    fn builtin_source_supplies_matching_id_display_name_and_content() {
+        let source = RulesetSource::resolve(None, "CodeSize.xml").unwrap();
+
+        assert_eq!(source.source_id(), "builtin:codesize");
+        assert_eq!(source.display_name(), "codesize");
+        assert_eq!(
+            source.read().unwrap(),
+            include_str!("../rulesets/codesize.xml")
+        );
     }
 }
