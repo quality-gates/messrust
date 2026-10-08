@@ -76,5 +76,5 @@ disk space is limited, then remove any retained areas that Mutarust reports.
 * Respect the storage space of the host. Before you finish, remove the
   container (`docker rm -f "$name"`). Remove build output and other cruft from
   the checkout (`rm -rf target .mutants mutarust-agentic.json mutarust-summary.json mutarust-report.html`).
-  Remove replaced development images
-  (`docker image prune -f --filter label=dev-image=messrust`).
+  Remove the development image
+  (`docker image prune -a -f --filter label=dev-image=messrust`).
