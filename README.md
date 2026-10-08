@@ -133,8 +133,9 @@ CARGO_BUILD_JOBS=4 mutarust --config mutarust.yml --coverage --workers 1 \
 On macOS, point `TMPDIR` at a real path under `$HOME` before a coverage run so
 LCOV paths resolve correctly.
 
-Development checks:
+Development checks run in the capped development container that
+[AGENTS.md](AGENTS.md#development-container) describes:
 
 ```console
-cargo test --all-targets --locked
+docker exec "$name" cargo test --all-targets --locked
 ```
