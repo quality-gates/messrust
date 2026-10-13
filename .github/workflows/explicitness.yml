@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   conformance:
-    uses: quality-gates/mess-detection/.github/workflows/explicitness.yml@b2da8bf90b8752ea658f716c6327ee7c50beb706
+    uses: quality-gates/mess-detection/.github/workflows/explicitness.yml@e0896093daeb17bd09afa635559a9b8bdc013283
     with:
       language: rust
-      contract_ref: b2da8bf90b8752ea658f716c6327ee7c50beb706
+      contract_ref: e0896093daeb17bd09afa635559a9b8bdc013283
