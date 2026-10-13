@@ -495,9 +495,21 @@ fn field_binding(
 ) -> Binding {
     let mut binding = expression(&field.base, bindings, model, scope);
     if let ValueType::Custom(key) = &binding.ty {
-        binding.ty = model.types.iter().find(|item| &item.key == key)
-            .and_then(|item| item.fields.iter().find(|item| matches!(&field.member, syn::Member::Named(name) if name == item.name.as_str())))
-            .map(|field| value_type(&field.ty, model, scope)).unwrap_or_default();
+        let name = match &field.member {
+            syn::Member::Named(name) => name.to_string(),
+            syn::Member::Unnamed(index) => index.index.to_string(),
+        };
+        if let Some((index, field)) = model.types.iter().find(|item| &item.key == key)
+            .and_then(|item| item.fields.iter().enumerate().find(|(_, field)| field.name == name)) {
+            if let Some(part) = binding.parts.get(index) {
+                if !part.is_empty_fact() {
+                    return part.clone();
+                }
+            }
+            binding.ty = value_type(&field.ty, model, scope);
+        } else {
+            binding.ty = ValueType::Unknown;
+        }
     } else if let (ValueType::Tuple(types), syn::Member::Unnamed(index)) =
         (&binding.ty, &field.member)
     {

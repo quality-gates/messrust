@@ -97,6 +97,7 @@ fn visit_write_target<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) {
     }
     match expr {
         Expr::Path(_) => {}
+        Expr::Field(field) => visit_field_write_target(collector, field),
         Expr::Index(index) => visit_index_write_target(collector, index),
         Expr::Unary(unary) => visit_unary_write_target(collector, unary),
         Expr::MethodCall(call) if transparent_write_accessor(collector, call) => {
@@ -107,6 +108,56 @@ fn visit_write_target<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) {
         }
         _ => collector.visit_expr(expr),
     }
+}
+
+fn visit_field_write_target<'a>(collector: &mut Collector<'a, '_>, field: &'a syn::ExprField) {
+    let receiver = values::binding(collector, &field.base);
+    if let ValueType::Custom(key) = &receiver.ty {
+        let field_name = match &field.member {
+            syn::Member::Named(name) => name.to_string(),
+            syn::Member::Unnamed(index) => index.index.to_string(),
+        };
+        let needs_deref = collector.model.types.iter().find(|ty| &ty.key == key)
+            .is_some_and(|ty| !ty.fields.iter().any(|item| item.name == field_name));
+        if needs_deref {
+            if let Some(target) = calls::method_target(collector, &receiver, "deref_mut") {
+                collector.edge(target, field.span().start().line, Bindings::new(), vec![receiver]);
+            } else {
+                collector.unknown(
+                    field.span().start().line,
+                    "it uses unresolved field dispatch".to_string(),
+                );
+            }
+        }
+    }
+    visit_write_target(collector, &field.base);
+}
+
+fn deref_mut_field(collector: &Collector<'_, '_>, receiver: &Binding) -> Option<String> {
+    let target = calls::method_target(collector, receiver, "deref_mut")?;
+    let Body::Block(body) = collector.tasks[target].body? else {
+        return None;
+    };
+    let syn::Stmt::Expr(expr, None) = body.stmts.last()? else {
+        return None;
+    };
+    let field = match expr {
+        Expr::Reference(reference) => &*reference.expr,
+        other => other,
+    };
+    let Expr::Field(field) = field else {
+        return None;
+    };
+    let Expr::Path(base) = &*field.base else {
+        return None;
+    };
+    if !base.path.is_ident("self") {
+        return None;
+    }
+    Some(match &field.member {
+        syn::Member::Named(name) => name.to_string(),
+        syn::Member::Unnamed(index) => index.index.to_string(),
+    })
 }
 
 fn visit_index_write_target<'a>(collector: &mut Collector<'a, '_>, index: &'a syn::ExprIndex) {
@@ -148,7 +199,6 @@ fn visit_unary_write_target<'a>(collector: &mut Collector<'a, '_>, unary: &'a sy
 
 fn write_target_child(expr: &Expr) -> Option<&Expr> {
     match expr {
-        Expr::Field(field) => Some(&field.base),
         Expr::Paren(paren) => Some(&paren.expr),
         Expr::Group(group) => Some(&group.expr),
         Expr::Reference(reference) => Some(&reference.expr),
@@ -482,7 +532,7 @@ impl<'a> Collector<'a, '_> {
     }
 
     fn note_write(&mut self, expr: &'a Expr, through: bool) {
-        let binding = values::binding(self, expr);
+        let binding = write_target_binding(self, expr);
         for owner in binding.outer {
             if !through && matches!(owner, Owner::Parameter(_)) {
                 continue;
@@ -496,6 +546,46 @@ impl<'a> Collector<'a, '_> {
                 expr.span().start().line,
                 contains_index(expr),
             ));
+        }
+    }
+
+    fn update_assigned_field(&mut self, left: &'a Expr, right: &'a Expr) {
+        let Expr::Field(field) = left else {
+            return;
+        };
+        let Expr::Path(path) = &*field.base else {
+            return;
+        };
+        let key = storage::path_text(&path.path);
+        let Some(owner) = self.bindings.get(&key).cloned() else {
+            return;
+        };
+        let ValueType::Custom(type_key) = &owner.ty else {
+            return;
+        };
+        let name = match &field.member {
+            syn::Member::Named(name) => name.to_string(),
+            syn::Member::Unnamed(index) => index.index.to_string(),
+        };
+        let Some((index, count)) = self.model.types.iter().find(|ty| &ty.key == type_key)
+            .and_then(|ty| ty.fields.iter().position(|field| field.name == name)
+                .map(|index| (index, ty.fields.len()))) else {
+            return;
+        };
+        let value = values::binding(self, right);
+        let aliases: Vec<_> = self.bindings.iter()
+            .filter(|(_, binding)| !owner.outer.is_empty()
+                && binding.ty == owner.ty && binding.outer == owner.outer)
+            .map(|(name, _)| name.clone())
+            .collect();
+        for alias in aliases {
+            let mut binding = self.bindings[&alias].clone();
+            binding.parts.resize(count, Binding::default());
+            binding.parts[index] = value.clone();
+            if deref_mut_field(self, &binding).as_deref() == Some(name.as_str()) {
+                binding.elements = value.outer.clone();
+            }
+            self.bindings.insert(alias, binding);
         }
     }
 
@@ -548,6 +638,25 @@ impl<'a> Collector<'a, '_> {
             "its loop value flow did not converge".to_string(),
         );
     }
+}
+
+fn write_target_binding<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) -> Binding {
+    let mut binding = match expr {
+        Expr::Field(field) => values::binding(collector, &field.base),
+        _ => values::binding(collector, expr),
+    };
+    if let Expr::Unary(unary) = expr {
+        if matches!(unary.op, syn::UnOp::Deref(_)) {
+            let receiver = match &*unary.expr {
+                Expr::MethodCall(call) if call.method == "deref_mut" => {
+                    values::binding(collector, &call.receiver)
+                }
+                _ => values::binding(collector, &unary.expr),
+            };
+            binding.outer.extend(receiver.elements);
+        }
+    }
+    binding
 }
 
 fn contains_index(expr: &Expr) -> bool {
@@ -644,6 +753,7 @@ impl<'a> Visit<'a> for Collector<'a, '_> {
         visit_write_target(self, &assign.left);
         self.visit_expr(&assign.right);
         calls::note_indirect_assignment(self, &assign.left, &assign.right);
+        self.update_assigned_field(&assign.left, &assign.right);
         if let Expr::Path(path) = &*assign.left {
             let mut value = values::binding(self, &assign.right);
             let key = storage::path_text(&path.path);
@@ -664,6 +774,7 @@ impl<'a> Visit<'a> for Collector<'a, '_> {
         calls::note_operator(self, &binary.left, binary.span().start().line);
         if is_compound_assign(&binary.op) {
             self.note_write(&binary.left, !matches!(&*binary.left, Expr::Path(_)));
+            visit_write_target(self, &binary.left);
         }
         self.visit_expr(&binary.left);
         self.visit_expr(&binary.right);

@@ -39,6 +39,7 @@ fn compound_value<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) -> Bind
         Expr::If(node) => if_value(collector, node),
         Expr::Match(node) => match_value(collector, node),
         Expr::Block(node) => block_value(collector, &node.block),
+        Expr::Struct(node) => struct_value(collector, node),
         _ => storage::expression(
             expr,
             &collector.bindings,
@@ -46,6 +47,41 @@ fn compound_value<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) -> Bind
             collector.scope(),
         ),
     }
+}
+
+fn struct_value<'a>(collector: &mut Collector<'a, '_>, node: &'a syn::ExprStruct) -> Binding {
+    let mut value = storage::expression(
+        &Expr::Struct(node.clone()),
+        &collector.bindings,
+        collector.model,
+        collector.scope(),
+    );
+    let ValueType::Custom(key) = &value.ty else {
+        return value;
+    };
+    let Some(fields) = collector.model.types.iter().find(|ty| &ty.key == key)
+        .map(|ty| ty.fields.iter().map(|field| field.name.clone()).collect::<Vec<_>>()) else {
+        return value;
+    };
+    value.parts = node.rest.as_ref()
+        .map(|rest| binding(collector, rest).parts)
+        .filter(|parts| parts.len() == fields.len())
+        .unwrap_or_else(|| vec![Binding::default(); fields.len()]);
+    for field in &node.fields {
+        let name = match &field.member {
+            syn::Member::Named(name) => name.to_string(),
+            syn::Member::Unnamed(index) => index.index.to_string(),
+        };
+        if let Some(index) = fields.iter().position(|field| field == &name) {
+            value.parts[index] = binding(collector, &field.expr);
+        }
+    }
+    if let Some(name) = super::deref_mut_field(collector, &value) {
+        if let Some(index) = fields.iter().position(|field| field == &name) {
+            value.elements.extend(value.parts[index].outer.iter().cloned());
+        }
+    }
+    value
 }
 
 fn wrapped_value<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) -> Option<Binding> {

@@ -978,6 +978,54 @@ impl IndexMut<usize> for Grid {
 }
 fn custom_deref() { let mut slot = Slot { value: 0 }; *slot = 1; }
 fn custom_index() { let mut grid = Grid { items: [0] }; grid[0] = 1; }
+fn custom_index_compound() { let mut grid = Grid { items: [0] }; grid[0] += 1; }
+struct Record { value: i32 }
+struct Wrapper { inner: Record }
+impl Deref for Wrapper {
+    type Target = Record;
+    fn deref(&self) -> &Record { &self.inner }
+}
+impl DerefMut for Wrapper {
+    fn deref_mut(&mut self) -> &mut Record {
+        println!("field effect");
+        &mut self.inner
+    }
+}
+fn custom_field() { let mut wrapper = Wrapper { inner: Record { value: 0 } }; wrapper.value = 4; }
+fn quiet_field() { let mut record = Record { value: 0 }; record.value = 4; }
+struct Loan<'a> { value: &'a mut i32 }
+impl<'a> Deref for Loan<'a> {
+    type Target = i32;
+    fn deref(&self) -> &i32 { self.value }
+}
+impl<'a> DerefMut for Loan<'a> {
+    fn deref_mut(&mut self) -> &mut i32 { self.value }
+}
+fn borrowed_deref(value: &mut i32) { let mut loan = Loan { value }; *loan = 8; }
+fn borrowed_deref_call(value: &mut i32) { let mut loan = Loan { value }; *loan.deref_mut() = 8; }
+struct Holder<'a> { value: &'a mut i32 }
+fn borrowed_field(value: &mut i32) { let holder = Holder { value }; *holder.value = 8; }
+fn quiet_borrowed_field() { let mut value = 0; let holder = Holder { value: &mut value }; *holder.value = 8; }
+fn rebound_deref(value: &mut i32) {
+    let mut local = 0;
+    let mut loan = Loan { value };
+    loan.value = &mut local;
+    *loan = 8;
+}
+fn rebound_deref_call(value: &mut i32) {
+    let mut local = 0;
+    let mut loan = Loan { value };
+    loan.value = &mut local;
+    *loan.deref_mut() = 8;
+}
+fn alias_rebound_deref(value: &mut i32) {
+    let mut local = 0;
+    let mut loan = Loan { value };
+    let alias = &mut loan;
+    alias.value = &mut local;
+    *loan = 8;
+}
+fn quiet_private_loan() { let mut value = 0; let mut loan = Loan { value: &mut value }; *loan = 8; }
 fn quiet_deref() { let mut value = 0; *(&mut value) = 1; }
 fn quiet_index() { let mut values = [0]; values[0] = 1; }
 "#;
@@ -992,6 +1040,17 @@ fn quiet_index() { let mut values = [0]; values[0] = 1; }
     };
     assert_eq!(rules("custom_deref"), vec!["ImplicitOutput"]);
     assert_eq!(rules("custom_index"), vec!["ImplicitOutput"]);
+    assert!(rules("custom_index_compound").contains(&"ImplicitOutput"));
+    assert_eq!(rules("custom_field"), vec!["ImplicitOutput"]);
+    assert!(rules("quiet_field").is_empty());
+    assert_eq!(rules("borrowed_deref"), vec!["ImplicitOutput"]);
+    assert_eq!(rules("borrowed_deref_call"), vec!["ImplicitOutput"]);
+    assert_eq!(rules("borrowed_field"), vec!["ImplicitOutput"]);
+    assert!(rules("quiet_borrowed_field").is_empty());
+    assert!(rules("rebound_deref").is_empty());
+    assert!(rules("rebound_deref_call").is_empty());
+    assert!(rules("alias_rebound_deref").is_empty());
+    assert!(rules("quiet_private_loan").is_empty());
     assert!(rules("quiet_deref").is_empty());
     assert!(rules("quiet_index").is_empty());
 }
