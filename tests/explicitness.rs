@@ -903,3 +903,50 @@ fn owned_custom_destructors_keep_uncertainty_at_scope_exit() {
         expect(4, "UnknownEffect", "The function 'consume' has an unknown effect: it can run an unresolved destructor."),
     ]);
 }
+
+#[test]
+fn write_target_subexpressions_keep_executed_actions() {
+    let source = r#"fn nested_macro_receiver() {
+    vec![{ println!("receiver action"); 1 }].push(2);
+}
+fn nested_index_target() {
+    let mut values = vec![0];
+    values[{ println!("index action"); 0 }] = 1;
+}
+fn control_macro_receiver() {
+    let mut values = vec![{ println!("control receiver"); 1 }];
+    values.push(2);
+}
+fn control_index_target() {
+    let mut values = vec![0];
+    let index = { println!("control index"); 0 };
+    values[index] = 1;
+}
+"#;
+    let (_, found) = run_ruleset(source, "explicitness");
+    assert_eq!(
+        found,
+        vec![
+            expect(
+                2,
+                "ImplicitOutput",
+                "The function 'nested_macro_receiver' has an implicit output: it uses 'println!'."
+            ),
+            expect(
+                6,
+                "ImplicitOutput",
+                "The function 'nested_index_target' has an implicit output: it uses 'println!'."
+            ),
+            expect(
+                9,
+                "ImplicitOutput",
+                "The function 'control_macro_receiver' has an implicit output: it uses 'println!'."
+            ),
+            expect(
+                14,
+                "ImplicitOutput",
+                "The function 'control_index_target' has an implicit output: it uses 'println!'."
+            ),
+        ]
+    );
+}

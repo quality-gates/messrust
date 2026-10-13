@@ -144,9 +144,9 @@ pub(super) fn method_call<'a>(collector: &mut Collector<'a, '_>, call: &'a syn::
     } else {
         super::calls::standard_call(collector, call, receiver, &method, line);
     }
-    if !is_mutator(&method) && !matches!(method.as_str(), "with" | "with_borrow_mut")
-        || matches!(&*call.receiver, Expr::Call(_))
-    {
+    if is_mutator(&method) || matches!(method.as_str(), "with" | "with_borrow_mut") {
+        super::visit_write_target(collector, &call.receiver);
+    } else {
         collector.visit_expr(&call.receiver);
     }
     for arg in &call.args {

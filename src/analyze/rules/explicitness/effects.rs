@@ -90,6 +90,65 @@ struct Collector<'a, 'm> {
     return_binding: Binding,
 }
 
+fn visit_write_target<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) {
+    if let Some(child) = write_target_child(expr) {
+        visit_write_target(collector, child);
+        return;
+    }
+    match expr {
+        Expr::Path(_) => {}
+        Expr::Index(index) => {
+            visit_write_target(collector, &index.expr);
+            collector.visit_expr(&index.index);
+        }
+        Expr::MethodCall(call) if transparent_write_accessor(collector, call) => {
+            visit_write_target(collector, &call.receiver);
+            for arg in &call.args {
+                collector.visit_expr(arg);
+            }
+        }
+        _ => collector.visit_expr(expr),
+    }
+}
+
+fn write_target_child(expr: &Expr) -> Option<&Expr> {
+    match expr {
+        Expr::Field(field) => Some(&field.base),
+        Expr::Paren(paren) => Some(&paren.expr),
+        Expr::Group(group) => Some(&group.expr),
+        Expr::Reference(reference) => Some(&reference.expr),
+        Expr::Unary(unary) => Some(&unary.expr),
+        _ => None,
+    }
+}
+
+fn transparent_write_accessor<'a>(
+    collector: &mut Collector<'a, '_>,
+    call: &'a syn::ExprMethodCall,
+) -> bool {
+    let receiver = values::binding(collector, &call.receiver);
+    let method = call.method.to_string();
+    matches!(
+        method.as_str(),
+        "borrow"
+            | "borrow_mut"
+            | "lock"
+            | "try_lock"
+            | "read"
+            | "write"
+            | "unwrap"
+            | "expect"
+            | "as_ref"
+            | "as_mut"
+            | "get_mut"
+            | "last_mut"
+            | "first_mut"
+            | "as_slice"
+            | "as_mut_slice"
+    ) && receiver.ty.standard()
+        && calls::method_target(collector, &receiver, &method).is_none()
+}
+
 pub(super) fn summaries(model: &FileModel<'_>, include_self: bool) -> Vec<Summary> {
     let macro_args = super::macros::Arguments::collect(model);
     let mut tasks: Vec<_> = model
@@ -548,6 +607,7 @@ impl<'a> Visit<'a> for Collector<'a, '_> {
 
     fn visit_expr_assign(&mut self, assign: &'a syn::ExprAssign) {
         self.note_write(&assign.left, !matches!(&*assign.left, Expr::Path(_)));
+        visit_write_target(self, &assign.left);
         self.visit_expr(&assign.right);
         calls::note_indirect_assignment(self, &assign.left, &assign.right);
         if let Expr::Path(path) = &*assign.left {
