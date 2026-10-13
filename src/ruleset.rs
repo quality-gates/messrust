@@ -1655,6 +1655,10 @@ const RULE_KINDS: &[(&str, RuleKind)] = &[
         RuleKind::ImplicitInput,
     ),
     (
+        "Messrust\\Rule\\Explicitness\\UnknownEffect",
+        RuleKind::UnknownEffect,
+    ),
+    (
         "Messrust\\Rule\\Explicitness\\ImplicitOutput",
         RuleKind::ImplicitOutput,
     ),
@@ -1828,7 +1832,7 @@ fn builtin_ruleset_for_rule(rule_name: &str) -> Option<&'static str> {
         | "CamelCaseParameterName"
         | "CamelCaseVariableName" => Some("controversial"),
 
-        "ImplicitInput" | "ImplicitOutput" => Some("explicitness"),
+        "ImplicitInput" | "ImplicitOutput" | "UnknownEffect" => Some("explicitness"),
 
         _ => None,
     }
@@ -2431,6 +2435,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(count, 41, "all 41 builtin rules should be indexed");
+        assert_eq!(count, 42, "all 42 builtin rules should be indexed");
     }
 }

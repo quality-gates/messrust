@@ -1,5 +1,3 @@
-//! AST walkers that build the file model.
-
 use std::collections::{HashMap, HashSet};
 
 use syn::spanned::Spanned;
@@ -49,16 +47,14 @@ impl<'ast> Visit<'ast> for DuplicateKeyCollector {
 }
 
 
-pub(crate) struct BindingCollector {
+pub(crate) struct BindingsWithoutLoopBinders {
     pub(crate) variables: Vec<NamedBinding>,
     pub(crate) constants: Vec<NamedBinding>,
 }
 
 
-impl<'ast> Visit<'ast> for BindingCollector {
+impl<'ast> Visit<'ast> for BindingsWithoutLoopBinders {
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        // Skip the loop pattern: naming rules treat binders as out of scope, which
-        // matches not recording them at all.
         self.visit_expr(&node.expr);
         self.visit_block(&node.body);
     }
@@ -222,7 +218,7 @@ fn scope_parent(scope: &str) -> String {
 }
 
 
-fn resolve_type_path(path: &str, scope: &str, imports: &TypeImports) -> String {
+pub(crate) fn resolve_type_path(path: &str, scope: &str, imports: &TypeImports) -> String {
     let segments: Vec<_> = path.split("::").map(str::to_string).collect();
     let mut seen = HashSet::new();
     resolve_type_segments(&segments, scope, imports, &mut seen).join("::")
@@ -279,7 +275,11 @@ pub(crate) fn collect_items<'a>(
             Item::Enum(e) => insert_enum(types, e, scope),
             Item::Union(u) => insert_union(types, u, scope),
             Item::Trait(t) => insert_trait(types, t, functions, scope),
-            Item::Fn(f) => functions.push(fn_from_item(f)),
+            Item::Fn(f) => {
+                let mut function = fn_from_item(f);
+                function.scope = scope.to_string();
+                functions.push(function);
+            },
             Item::Impl(im) => attach_impl(types, functions, im, scope, imports, ignore_tests),
             Item::Mod(module) => {
                 collect_module_items(module, scope, types, functions, imports, ignore_tests)
@@ -303,6 +303,29 @@ pub(crate) fn collect_module_items<'a>(
         let new_scope = scoped_key(scope, &mod_name);
         collect_items(nested, &new_scope, types, functions, imports, ignore_tests);
     }
+}
+
+pub(crate) fn collect_macro_names(items: &[Item], scope: &str) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in items {
+        match item {
+            Item::Macro(item) => {
+                if let Some(ident) = &item.ident {
+                    let name = ident.to_string();
+                    names.insert(name.clone());
+                    names.insert(scoped_key(scope, &name));
+                }
+            }
+            Item::Mod(module) => {
+                if let Some((_, nested)) = &module.content {
+                    let nested_scope = scoped_key(scope, &module.ident.to_string());
+                    names.extend(collect_macro_names(nested, &nested_scope));
+                }
+            }
+            _ => {}
+        }
+    }
+    names
 }
 
 
@@ -371,6 +394,7 @@ pub(crate) fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
                     name: ident.to_string(),
                     begin_line: ident.span().start().line,
                     type_names: type_names_in(&f.ty),
+                    ty: f.ty.clone(),
                 })
             })
             .collect(),
@@ -382,6 +406,7 @@ pub(crate) fn field_infos(fields: &Fields) -> Vec<FieldInfo> {
                 name: i.to_string(),
                 begin_line: f.ty.span().start().line,
                 type_names: type_names_in(&f.ty),
+                ty: f.ty.clone(),
             })
             .collect(),
         Fields::Unit => Vec::new(),
@@ -459,6 +484,7 @@ pub(crate) fn insert_union<'a>(
                 name: ident.to_string(),
                 begin_line: ident.span().start().line,
                 type_names: type_names_in(&f.ty),
+                ty: f.ty.clone(),
             })
         })
         .collect();
@@ -515,8 +541,8 @@ pub(crate) fn insert_trait<'a>(
                 returns_bool: returns_bool(&m.sig.output),
                 dep_types: sig_dep_types(&m.sig),
                 counts_for_type_metrics: false,
+                scope: scope.to_string(),
                 signature: &m.sig,
-                in_trait_impl: false,
             });
         }
     }
@@ -558,14 +584,12 @@ pub(crate) fn fn_from_item(f: &ItemFn) -> FnModel<'_> {
         returns_bool: returns_bool(&f.sig.output),
         dep_types: sig_dep_types(&f.sig),
         counts_for_type_metrics: false,
+        scope: String::new(),
         signature: &f.sig,
-        in_trait_impl: false,
     }
 }
 
 
-/// Key of the type that an `impl` block belongs to. A key that the model
-/// already holds wins, so an `impl` block joins the declaration of its type.
 fn impl_type_key(
     types: &HashMap<String, TypeModel<'_>>,
     im: &ItemImpl,
@@ -622,8 +646,8 @@ fn attach_impl_method<'a>(
         returns_bool: returns_bool(&method.sig.output),
         dep_types: sig_dep_types(&method.sig),
         counts_for_type_metrics: inherent,
+        scope: key.rsplit_once("::").map_or("", |(scope, _)| scope).to_string(),
         signature: &method.sig,
-        in_trait_impl: !inherent,
     });
 }
 
@@ -637,8 +661,6 @@ pub(crate) fn attach_impl<'a>(
     ignore_tests: bool,
 ) {
     let ty_name = type_name_from_path(&im.self_ty);
-    // A test-only `impl` block holds no production code. Keep the whole block
-    // out of the model, so no type metric counts its methods.
     if ty_name.is_empty() || (ignore_tests && is_test_module(&im.attrs)) {
         return;
     }
@@ -660,7 +682,6 @@ pub(crate) fn attach_impl<'a>(
         let syn::ImplItem::Fn(method) = item else {
             continue;
         };
-        // A method with its own test-only `cfg` attribute drops the same way.
         if ignore_tests && is_test_module(&method.attrs) {
             continue;
         }
@@ -779,8 +800,6 @@ impl StaticMutCollector {
         });
     }
 
-    /// Records a `static mut` declared in a block. The key holds the
-    /// declaration position, so it cannot match a module-level static.
     fn record_block_static(&mut self, node: &syn::ItemStatic, local: &mut HashMap<String, String>) {
         if matches!(node.mutability, syn::StaticMutability::None) {
             return;
@@ -1073,9 +1092,6 @@ fn collect_mutated_static_place(
 }
 
 
-/// Returns the expression one step closer to the root of an assignment
-/// place: the base of a field or index, the inner expression of
-/// parentheses, a dereference, or a `&raw mut` address.
 fn place_base(expr: &syn::Expr) -> Option<&syn::Expr> {
     match expr {
         syn::Expr::Field(f) => Some(&f.base),
@@ -1090,23 +1106,26 @@ fn place_base(expr: &syn::Expr) -> Option<&syn::Expr> {
 }
 
 
-/// Collects the names of statics that can hold a different value between
-/// calls: `static mut` items, statics with an interior-mutability type, and
-/// `thread_local!` keys. An immutable static of a plain type acts as a
-/// constant, so it does not enter the set.
 #[derive(Default)]
 pub(crate) struct SharedStaticCollector {
     pub(crate) names: HashSet<String>,
+    pub(crate) types: HashMap<String, syn::Type>,
 }
 
 
 impl<'ast> Visit<'ast> for SharedStaticCollector {
     fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        self.types.insert(node.ident.to_string(), (*node.ty).clone());
         let mutable = !matches!(node.mutability, syn::StaticMutability::None);
         if mutable || has_interior_mutable_type(&node.ty) {
             self.names.insert(node.ident.to_string());
         }
         syn::visit::visit_item_static(self, node);
+    }
+
+    fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
+        self.types.insert(node.ident.to_string(), (*node.ty).clone());
+        syn::visit::visit_item_const(self, node);
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
@@ -1117,8 +1136,6 @@ impl<'ast> Visit<'ast> for SharedStaticCollector {
 }
 
 
-/// True when `ty` or one of its generic arguments is interior-mutable, for
-/// example `LazyLock<Mutex<T>>`.
 fn has_interior_mutable_type(ty: &syn::Type) -> bool {
     let mut finder = InteriorMutableFinder { found: false };
     finder.visit_type(ty);

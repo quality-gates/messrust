@@ -81,6 +81,26 @@ fn boolean_argument_flag_reports_bool_param_at_param_line() {
 }
 
 #[test]
+fn boolean_argument_flag_reports_grouped_parameter_patterns() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "grouped.rs",
+        "fn plain(flag: bool) {}\nfn grouped((flag): bool) {}\nfn value((count): i32) {}\nfn ignored((_flag): bool) {}\n",
+    );
+    let (code, out, err) = run_only(&path, "BooleanArgumentFlag");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?}");
+    assert_eq!(
+        out,
+        format!(
+            "{}:1  BooleanArgumentFlag  The method plain has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.\n{}:2  BooleanArgumentFlag  The method grouped has a boolean flag argument flag, which is a certain sign of a Single Responsibility Principle violation.\n",
+            path.display(),
+            path.display(),
+        ),
+    );
+}
+
+#[test]
 fn boolean_argument_flag_reports_method_with_enclosing_type_image() {
     let dir = TempDir::new().unwrap();
     let path = write_file(

@@ -45,5 +45,6 @@ pub enum RuleKind {
     CamelCaseVariableName,
     ImplicitInput,
     ImplicitOutput,
+    UnknownEffect,
 }
 

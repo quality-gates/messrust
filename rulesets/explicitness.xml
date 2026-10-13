@@ -51,13 +51,12 @@ fn over_limit_explicit(count: usize, limit: usize) -> bool {
 Reports data that goes out of a function but not through its return value:
 writes to mutable or interior-mutable statics and thread-local keys, print and
 log macros, calls that change the file system, the environment, or the process,
-and '&mut' parameters. Set include-self to true to also report '&mut self'
-receivers and writes to 'self' in methods.
+and writes through borrowed parameters, including borrowed 'self'.
             ]]>
         </description>
         <priority>3</priority>
         <properties>
-            <property name="include-self" description="Report changes to 'self' in methods as implicit outputs" value="false"/>
+            <property name="include-self" description="Borrowed receiver writes are reported in both modes" value="false"/>
         </properties>
         <example>
             <![CDATA[
@@ -72,5 +71,12 @@ fn add_item_explicit(cart: &[Item], item: Item) -> Vec<Item> {
 }
             ]]>
         </example>
+    </rule>
+    <rule name="UnknownEffect"
+          since="0.1.12"
+          message="The {0} '{1}' has an unknown effect: {2}."
+          class="Messrust\Rule\Explicitness\UnknownEffect">
+        <description>Reports calls and operations whose effects the file analysis cannot establish.</description>
+        <priority>3</priority>
     </rule>
 </ruleset>
