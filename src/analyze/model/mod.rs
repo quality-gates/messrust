@@ -1,5 +1,3 @@
-//! File model: types, functions, use-def, and related collectors.
-
 mod build;
 mod use_def;
 
@@ -22,8 +20,8 @@ use crate::metrics::{effective_line_count, effective_line_prefix};
 use super::helpers::is_public;
 
 use self::build::{
-    collect_items, BindingCollector, DuplicateKeyCollector, SharedStaticCollector,
-    StaticMutCollector, TypeImports,
+    collect_items, collect_macro_names, BindingsWithoutLoopBinders, DuplicateKeyCollector,
+    SharedStaticCollector, StaticMutCollector, TypeImports,
 };
 use self::use_def::UseDefCollector;
 
@@ -65,14 +63,13 @@ pub(crate) fn bool_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token
 
 
 pub(crate) fn collect_bool_param_names(pat: &Pat, out: &mut Vec<BoolParam>) {
-    // bool_params only invokes this when the parameter type path is `bool`, so
-    // tuple/paren destructuring patterns cannot appear here.
     match pat {
         Pat::Ident(id) => out.push(BoolParam {
             name: id.ident.to_string(),
             begin_line: id.ident.span().start().line,
         }),
         Pat::Reference(r) => collect_bool_param_names(&r.pat, out),
+        Pat::Paren(p) => collect_bool_param_names(&p.pat, out),
         _ => {}
     }
 }
@@ -160,8 +157,8 @@ pub(crate) struct FnModel<'a> {
     pub(crate) returns_bool: bool,
     pub(crate) dep_types: Vec<String>,
     pub(crate) counts_for_type_metrics: bool,
+    pub(crate) scope: String,
     pub(crate) signature: &'a syn::Signature,
-    pub(crate) in_trait_impl: bool,
 }
 
 
@@ -191,6 +188,7 @@ pub(crate) struct FieldInfo {
     pub(crate) name: String,
     pub(crate) begin_line: usize,
     pub(crate) type_names: Vec<String>,
+    pub(crate) ty: syn::Type,
 }
 
 
@@ -254,6 +252,9 @@ pub(crate) struct FileModel<'a> {
     pub(crate) static_muts: Vec<StaticMutSite>,
     pub(crate) mutated_statics: HashSet<String>,
     pub(crate) shared_statics: HashSet<String>,
+    pub(crate) static_types: HashMap<String, syn::Type>,
+    pub(crate) local_macros: HashSet<String>,
+    pub(crate) imports: TypeImports,
 }
 
 #[derive(Default)]
@@ -270,8 +271,6 @@ pub(crate) struct UseDefModel {
 }
 
 impl UseDefModel {
-    /// Keeps the reads and calls of `self` and takes all declarations from
-    /// `other`.
     fn with_declarations_from(self, other: UseDefModel) -> Self {
         Self {
             locals: other.locals,
@@ -301,18 +300,13 @@ pub(crate) struct StaticMutSite {
 
 
 impl<'a> FileModel<'a> {
-    /// Builds the model of one file. With `production` set (the file without
-    /// its `#[cfg(test)]` modules), items that rules report come only from
-    /// `production`, and an `impl` block or a method that only compiles with
-    /// `test` on does not enter the model. Reads, calls, and writes still come
-    /// from the full `file`, so a use in test code keeps its target used.
     pub(crate) fn from_file(
-        file: &'a syn::File,
-        production: Option<&'a syn::File>,
+        full_usage: &'a syn::File,
+        reported_decls: Option<&'a syn::File>,
         src: &'a str,
     ) -> Self {
-        let ignore_tests = production.is_some();
-        let declared = production.unwrap_or(file);
+        let ignore_tests = reported_decls.is_some();
+        let declared = reported_decls.unwrap_or(full_usage);
         let mut types: HashMap<String, TypeModel<'a>> = HashMap::new();
         let mut functions = Vec::new();
         let mut type_imports = TypeImports::default();
@@ -324,6 +318,7 @@ impl<'a> FileModel<'a> {
             &mut type_imports,
             ignore_tests,
         );
+        let local_macros = collect_macro_names(&declared.items, "");
         let mut metric_functions_by_parent: HashMap<String, Vec<usize>> = HashMap::new();
         for (index, function) in functions.iter().enumerate() {
             if !function.counts_for_type_metrics {
@@ -337,27 +332,27 @@ impl<'a> FileModel<'a> {
             }
         }
 
-        let mut binder = BindingCollector {
+        let mut binder = BindingsWithoutLoopBinders {
             variables: Vec::new(),
             constants: Vec::new(),
         };
         binder.visit_file(declared);
 
-        let usage = use_def_model(file, production);
+        let usage = use_def_model(full_usage, reported_decls);
 
         let mut dup = DuplicateKeyCollector::default();
         dup.visit_file(declared);
 
         let mut statics = StaticMutCollector::default();
-        statics.visit_file(file);
-        if let Some(production) = production {
-            let mut production_statics = StaticMutCollector::default();
-            production_statics.visit_file(production);
-            statics.static_muts = production_statics.static_muts;
+        statics.visit_file(full_usage);
+        if let Some(reported_decls) = reported_decls {
+            let mut reported_statics = StaticMutCollector::default();
+            reported_statics.visit_file(reported_decls);
+            statics.static_muts = reported_statics.static_muts;
         }
 
         let mut shared = SharedStaticCollector::default();
-        shared.visit_file(file);
+        shared.visit_file(full_usage);
 
         let types: Vec<_> = types.into_values().collect();
         Self {
@@ -376,17 +371,18 @@ impl<'a> FileModel<'a> {
             static_muts: statics.static_muts,
             mutated_statics: statics.mutated,
             shared_statics: shared.names,
+            static_types: shared.types,
+            local_macros,
+            imports: type_imports,
         }
     }
 
 }
 
-/// Collects the declarations from `production` when it is set, and the reads
-/// and calls from the full `file`.
-fn use_def_model(file: &syn::File, production: Option<&syn::File>) -> UseDefModel {
-    let model = collect_use_def(file);
-    match production {
-        Some(production) => model.with_declarations_from(collect_use_def(production)),
+fn use_def_model(full_usage: &syn::File, reported_decls: Option<&syn::File>) -> UseDefModel {
+    let model = collect_use_def(full_usage);
+    match reported_decls {
+        Some(reported_decls) => model.with_declarations_from(collect_use_def(reported_decls)),
         None => model,
     }
 }
@@ -397,7 +393,7 @@ fn collect_use_def(file: &syn::File) -> UseDefModel {
     usage.into_model()
 }
 
-pub(crate) use self::build::is_builtin_type;
+pub(crate) use self::build::{is_builtin_type, resolve_type_path};
 
 #[cfg(test)]
 mod tests {

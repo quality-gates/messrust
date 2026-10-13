@@ -227,6 +227,7 @@ pub(crate) const RULE_HANDLERS: &[RuleHandler] = &[
     apply_camel_case_variable_name,
     apply_implicit_input,
     apply_implicit_output,
+    apply_unknown_effect,
 ];
 
 
