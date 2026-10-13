@@ -97,10 +97,8 @@ fn visit_write_target<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) {
     }
     match expr {
         Expr::Path(_) => {}
-        Expr::Index(index) => {
-            visit_write_target(collector, &index.expr);
-            collector.visit_expr(&index.index);
-        }
+        Expr::Index(index) => visit_index_write_target(collector, index),
+        Expr::Unary(unary) => visit_unary_write_target(collector, unary),
         Expr::MethodCall(call) if transparent_write_accessor(collector, call) => {
             visit_write_target(collector, &call.receiver);
             for arg in &call.args {
@@ -111,13 +109,49 @@ fn visit_write_target<'a>(collector: &mut Collector<'a, '_>, expr: &'a Expr) {
     }
 }
 
+fn visit_index_write_target<'a>(collector: &mut Collector<'a, '_>, index: &'a syn::ExprIndex) {
+    let receiver = values::binding(collector, &index.expr);
+    if !matches!(receiver.ty, ValueType::Sequence(_)) {
+        if let Some(target) = calls::method_target(collector, &receiver, "index_mut") {
+            let argument = values::binding(collector, &index.index);
+            collector.edge(
+                target,
+                index.span().start().line,
+                Bindings::new(),
+                vec![receiver, argument],
+            );
+        } else {
+            collector.unknown(
+                index.span().start().line,
+                "it uses unresolved indexing".to_string(),
+            );
+        }
+    }
+    visit_write_target(collector, &index.expr);
+    collector.visit_expr(&index.index);
+}
+
+fn visit_unary_write_target<'a>(collector: &mut Collector<'a, '_>, unary: &'a syn::ExprUnary) {
+    let receiver = values::binding(collector, &unary.expr);
+    if matches!(receiver.ty, ValueType::Custom(_) | ValueType::Pointer) {
+        if let Some(target) = calls::method_target(collector, &receiver, "deref_mut") {
+            collector.edge(target, unary.span().start().line, Bindings::new(), vec![receiver]);
+        } else {
+            collector.unknown(
+                unary.span().start().line,
+                "it uses unresolved unary dispatch".to_string(),
+            );
+        }
+    }
+    visit_write_target(collector, &unary.expr);
+}
+
 fn write_target_child(expr: &Expr) -> Option<&Expr> {
     match expr {
         Expr::Field(field) => Some(&field.base),
         Expr::Paren(paren) => Some(&paren.expr),
         Expr::Group(group) => Some(&group.expr),
         Expr::Reference(reference) => Some(&reference.expr),
-        Expr::Unary(unary) => Some(&unary.expr),
         _ => None,
     }
 }

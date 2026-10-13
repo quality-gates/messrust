@@ -950,3 +950,48 @@ fn control_index_target() {
         ]
     );
 }
+
+#[test]
+fn custom_write_targets_run_mutable_dispatch() {
+    let source = r#"use std::ops::{Deref, DerefMut, Index, IndexMut};
+struct Slot { value: i32 }
+impl Deref for Slot {
+    type Target = i32;
+    fn deref(&self) -> &i32 { &self.value }
+}
+impl DerefMut for Slot {
+    fn deref_mut(&mut self) -> &mut i32 {
+        println!("deref effect");
+        &mut self.value
+    }
+}
+struct Grid { items: [i32; 1] }
+impl Index<usize> for Grid {
+    type Output = i32;
+    fn index(&self, index: usize) -> &i32 { &self.items[index] }
+}
+impl IndexMut<usize> for Grid {
+    fn index_mut(&mut self, index: usize) -> &mut i32 {
+        println!("index effect");
+        &mut self.items[index]
+    }
+}
+fn custom_deref() { let mut slot = Slot { value: 0 }; *slot = 1; }
+fn custom_index() { let mut grid = Grid { items: [0] }; grid[0] = 1; }
+fn quiet_deref() { let mut value = 0; *(&mut value) = 1; }
+fn quiet_index() { let mut values = [0]; values[0] = 1; }
+"#;
+    let (_, report) = run_json(source, "explicitness");
+    let violations = report["files"][0]["violations"].as_array().unwrap();
+    let rules = |owner: &str| {
+        violations
+            .iter()
+            .filter(|violation| violation["function"] == owner)
+            .map(|violation| violation["rule"].as_str().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rules("custom_deref"), vec!["ImplicitOutput"]);
+    assert_eq!(rules("custom_index"), vec!["ImplicitOutput"]);
+    assert!(rules("quiet_deref").is_empty());
+    assert!(rules("quiet_index").is_empty());
+}
