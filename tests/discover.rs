@@ -237,10 +237,10 @@ fn ignore_tests_on_direct_file_path_ignores_ancestor_test_directory() {
 
 #[test]
 fn ignore_tests_scans_explicit_relative_root_below_tests_ancestor() {
-    let dir = TempDir::new_in("target").unwrap();
+    let cwd = std::env::current_dir().unwrap();
+    let dir = TempDir::new_in(&cwd).unwrap();
     let root = dir.path().join("tests/project/src");
     write_file(&root, "main.rs", unused_local_fixture());
-    let cwd = std::env::current_dir().unwrap();
     let relative_root = root.strip_prefix(cwd).unwrap();
 
     let (code, out, err) = run_cli(&[
