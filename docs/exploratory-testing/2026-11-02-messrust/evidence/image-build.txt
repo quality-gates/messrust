@@ -1,0 +1,83 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from dev.Dockerfile
+#1 transferring dockerfile: 602B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/rust:1.85.1-slim
+#2 DONE 0.7s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 66B done
+#3 DONE 0.0s
+
+#4 [1/6] FROM docker.io/library/rust:1.85.1-slim@sha256:9f841bbe9e7d8e37ceb96ed907265a3a0df7f44e3737d0b100e7907a679acb36
+#4 resolve docker.io/library/rust:1.85.1-slim@sha256:9f841bbe9e7d8e37ceb96ed907265a3a0df7f44e3737d0b100e7907a679acb36 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 1.53MB 0.1s done
+#5 DONE 0.1s
+
+#6 [2/6] RUN apt-get update && apt-get install -y --no-install-recommends git bash python3 && rm -rf /var/lib/apt/lists/*     && git config --system safe.directory '*'
+#6 CACHED
+
+#7 [3/6] RUN rustup component add clippy rustfmt
+#7 CACHED
+
+#8 [4/6] WORKDIR /workspace
+#8 CACHED
+
+#9 [5/6] COPY . .
+#9 DONE 0.2s
+
+#10 [6/6] RUN cargo fetch --locked
+#10 0.544     Updating crates.io index
+#10 1.353  Downloading crates ...
+#10 1.442   Downloaded windows-link v0.2.1
+#10 1.447   Downloaded tempfile v3.27.0
+#10 1.458   Downloaded winapi-util v0.1.11
+#10 1.464   Downloaded walkdir v2.5.0
+#10 1.470   Downloaded same-file v1.0.6
+#10 1.482   Downloaded zmij v1.0.23
+#10 1.492   Downloaded cfg-if v1.0.4
+#10 1.498   Downloaded roxmltree v0.20.0
+#10 1.527   Downloaded unicode-ident v1.0.24
+#10 1.533   Downloaded serde v1.0.229
+#10 1.542   Downloaded memchr v2.8.3
+#10 1.556   Downloaded serde_derive v1.0.229
+#10 1.563   Downloaded regex v1.13.1
+#10 1.575   Downloaded serde_json v1.0.151
+#10 1.591   Downloaded serde_core v1.0.229
+#10 1.598   Downloaded aho-corasick v1.1.5
+#10 1.610   Downloaded proc-macro2 v1.0.107
+#10 1.617   Downloaded bitflags v2.13.2
+#10 1.627   Downloaded r-efi v6.0.0
+#10 1.637   Downloaded getrandom v0.4.3
+#10 1.644   Downloaded itoa v1.0.18
+#10 1.647   Downloaded syn v2.0.119
+#10 1.669   Downloaded quote v1.0.47
+#10 1.675   Downloaded once_cell v1.21.4
+#10 1.680   Downloaded syn v3.0.5
+#10 1.703   Downloaded regex-syntax v0.8.11
+#10 1.720   Downloaded rustix v1.1.4
+#10 1.773   Downloaded errno v0.3.14
+#10 1.776   Downloaded fastrand v2.5.0
+#10 1.782   Downloaded regex-automata v0.4.18
+#10 1.831   Downloaded libc v0.2.189
+#10 1.954   Downloaded windows-sys v0.61.2
+#10 2.125   Downloaded linux-raw-sys v0.12.1
+#10 DONE 2.5s
+
+#11 exporting to image
+#11 exporting layers
+#11 exporting layers 4.7s done
+#11 exporting manifest sha256:d4a7eefa72163e16b48577ee6a54045d4e56ddab254c515769b0d9e87cbf4372
+#11 exporting manifest sha256:d4a7eefa72163e16b48577ee6a54045d4e56ddab254c515769b0d9e87cbf4372 0.0s done
+#11 exporting config sha256:6b6a10c6359c5b6314de006a26292c5bc93c8e8a294e7e1d498873cae9d9710e done
+#11 exporting attestation manifest sha256:c04be8aaae6aa5e221f5d1f58586bab602a6672e736cc4059546c4cdcd53a54c 0.0s done
+#11 exporting manifest list sha256:026bc248ad0c76562c46811557da7dae058c16bd0673b6edc339a153a21f4b57 done
+#11 naming to docker.io/library/messrust-et-20261102:run done
+#11 unpacking to docker.io/library/messrust-et-20261102:run
+#11 unpacking to docker.io/library/messrust-et-20261102:run 4.0s done
+#11 DONE 8.8s

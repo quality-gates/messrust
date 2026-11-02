@@ -1,0 +1,310 @@
+messrust 0.1.16
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs text rust --only UnusedLocalVariable
+/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs:2   UnusedLocalVariable  Avoid unused local variables such as 'unused_value'.
+/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs:10  UnusedLocalVariable  Avoid unused local variables such as 'test_unused'.
+exit=2
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs text rust --only UnusedLocalVariable --ignore-tests --strict
+/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs:2  UnusedLocalVariable               Avoid unused local variables such as 'unused_value'.
+/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs:4  UnusedLocalVariable [suppressed]  Avoid unused local variables such as 'intentional_unused'.
+exit=2
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs json rust --only UnusedLocalVariable --ignore-tests --reportfile docs/exploratory-testing/2026-11-02-messrust/scratch/report.json --ignore-violations-on-exit
+exit=0
+report file contents:
+{
+    "version": "0.1.16",
+    "package": "messrust",
+    "timestamp": "2026-11-02T09:34:43Z",
+    "files": [
+        {
+            "file": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs",
+            "violations": [
+                {
+                    "beginLine": 2,
+                    "endLine": 2,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'unused_value'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                }
+            ]
+        }
+    ]
+}
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/params.rs text docs/exploratory-testing/2026-11-02-messrust/policy.xml
+/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/params.rs:1  ExcessiveParameterList  The function example has 5 parameters. Consider reducing the number of parameters to less than 4.
+exit=2
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/params.rs text docs/exploratory-testing/2026-11-02-messrust/policy.xml,codesize --only ExcessiveParameterList
+exit=0
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/params.rs text codesize,docs/exploratory-testing/2026-11-02-messrust/policy.xml --only ExcessiveParameterList
+/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/params.rs:1  ExcessiveParameterList  The function example has 5 parameters. Consider reducing the number of parameters to less than 4.
+exit=2
+
+replay=1
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/broken.rs,docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs json rust --only UnusedLocalVariable --reportfile docs/exploratory-testing/2026-11-02-messrust/scratch/errors.json
+exit=1
+json report contents:
+{
+    "version": "0.1.16",
+    "package": "messrust",
+    "timestamp": "2026-11-02T09:34:43Z",
+    "files": [
+        {
+            "file": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs",
+            "violations": [
+                {
+                    "beginLine": 2,
+                    "endLine": 2,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'unused_value'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 10,
+                    "endLine": 10,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'test_unused'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                }
+            ]
+        }
+    ],
+    "errors": [
+        {
+            "fileName": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/broken.rs",
+            "message": "cannot parse string into token stream"
+        }
+    ]
+}
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/broken.rs,docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs sarif rust --only UnusedLocalVariable --reportfile docs/exploratory-testing/2026-11-02-messrust/scratch/errors.sarif
+exit=1
+sarif report contents:
+{
+    "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+    "runs": [
+        {
+            "results": [
+                {
+                    "level": "warning",
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs"
+                                },
+                                "region": {
+                                    "endLine": 2,
+                                    "startLine": 2
+                                }
+                            }
+                        }
+                    ],
+                    "message": {
+                        "text": "Avoid unused local variables such as 'unused_value'."
+                    },
+                    "properties": {
+                        "priority": 3,
+                        "suppressed": false
+                    },
+                    "ruleId": "UnusedLocalVariable"
+                },
+                {
+                    "level": "warning",
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs"
+                                },
+                                "region": {
+                                    "endLine": 10,
+                                    "startLine": 10
+                                }
+                            }
+                        }
+                    ],
+                    "message": {
+                        "text": "Avoid unused local variables such as 'test_unused'."
+                    },
+                    "properties": {
+                        "priority": 3,
+                        "suppressed": false
+                    },
+                    "ruleId": "UnusedLocalVariable"
+                }
+            ],
+            "tool": {
+                "driver": {
+                    "name": "messrust",
+                    "rules": [
+                        {
+                            "id": "UnusedLocalVariable",
+                            "name": "UnusedLocalVariable",
+                            "shortDescription": {
+                                "text": "UnusedLocalVariable"
+                            }
+                        }
+                    ],
+                    "version": "0.1.16"
+                }
+            }
+        }
+    ],
+    "version": "2.1.0"
+}
+
+replay=2
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/broken.rs,docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs json rust --only UnusedLocalVariable --reportfile docs/exploratory-testing/2026-11-02-messrust/scratch/errors.json
+exit=1
+json report contents:
+{
+    "version": "0.1.16",
+    "package": "messrust",
+    "timestamp": "2026-11-02T09:34:43Z",
+    "files": [
+        {
+            "file": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs",
+            "violations": [
+                {
+                    "beginLine": 2,
+                    "endLine": 2,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'unused_value'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                },
+                {
+                    "beginLine": 10,
+                    "endLine": 10,
+                    "package": "",
+                    "function": "",
+                    "class": "",
+                    "method": "",
+                    "description": "Avoid unused local variables such as 'test_unused'.",
+                    "rule": "UnusedLocalVariable",
+                    "ruleSet": "Unused Code Rules",
+                    "externalInfoUrl": "",
+                    "priority": 3,
+                    "suppressed": false
+                }
+            ]
+        }
+    ],
+    "errors": [
+        {
+            "fileName": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/broken.rs",
+            "message": "cannot parse string into token stream"
+        }
+    ]
+}
+
+$ ./target/release/messrust docs/exploratory-testing/2026-11-02-messrust/fixtures/broken.rs,docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs sarif rust --only UnusedLocalVariable --reportfile docs/exploratory-testing/2026-11-02-messrust/scratch/errors.sarif
+exit=1
+sarif report contents:
+{
+    "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+    "runs": [
+        {
+            "results": [
+                {
+                    "level": "warning",
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs"
+                                },
+                                "region": {
+                                    "endLine": 2,
+                                    "startLine": 2
+                                }
+                            }
+                        }
+                    ],
+                    "message": {
+                        "text": "Avoid unused local variables such as 'unused_value'."
+                    },
+                    "properties": {
+                        "priority": 3,
+                        "suppressed": false
+                    },
+                    "ruleId": "UnusedLocalVariable"
+                },
+                {
+                    "level": "warning",
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": "/workspace/docs/exploratory-testing/2026-11-02-messrust/fixtures/service.rs"
+                                },
+                                "region": {
+                                    "endLine": 10,
+                                    "startLine": 10
+                                }
+                            }
+                        }
+                    ],
+                    "message": {
+                        "text": "Avoid unused local variables such as 'test_unused'."
+                    },
+                    "properties": {
+                        "priority": 3,
+                        "suppressed": false
+                    },
+                    "ruleId": "UnusedLocalVariable"
+                }
+            ],
+            "tool": {
+                "driver": {
+                    "name": "messrust",
+                    "rules": [
+                        {
+                            "id": "UnusedLocalVariable",
+                            "name": "UnusedLocalVariable",
+                            "shortDescription": {
+                                "text": "UnusedLocalVariable"
+                            }
+                        }
+                    ],
+                    "version": "0.1.16"
+                }
+            }
+        }
+    ],
+    "version": "2.1.0"
+}
