@@ -1,0 +1,7 @@
+<ruleset name="team policy">
+  <rule ref="ExcessiveParameterList">
+    <properties>
+      <property name="minimum" value="4" />
+    </properties>
+  </rule>
+</ruleset>
