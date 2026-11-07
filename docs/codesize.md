@@ -82,10 +82,15 @@ case instead of forcing a pointless split.
 wildcards such as `_: Context`. A finding often means related values want a
 small input struct—only group values that belong together.
 
-`ExcessivePublicCount` counts public fields and public methods.
-`TooManyPublicMethods` counts public methods only. A large public surface is
-expensive because more callers can depend on it. Trait methods count as public
-only when the trait itself is public.
+`ExcessivePublicCount` counts fields and methods declared with plain `pub`.
+`TooManyPublicMethods` counts methods declared with plain `pub`, subject to its
+name filter. Both rules exclude restricted visibility such as `pub(crate)`,
+`pub(super)`, and `pub(in path)`. For both rules, methods declared in a trait
+count only when the trait itself has plain `pub` visibility.
+
+The unused-private rules check for inherited visibility instead. A restricted
+field or method is therefore neither public for these code-size rules nor
+private for the unused-private rules. See [unused code](unusedcode.md).
 
 ## Type size and responsibility
 
