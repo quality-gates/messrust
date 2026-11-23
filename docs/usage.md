@@ -35,6 +35,8 @@ to an XML file.
 Structured formats carry stable path, line, rule, priority, message, context,
 and suppression fields. Findings sort by file and source line.
 `--reportfile <path>` writes the report to a file and leaves stdout empty.
+For `html`, `sarif`, `gitlab`, and `checkstyle`, processing errors go to
+stderr. Other formats include them in the report.
 `--color` colorizes text output.
 
 ## Choose a policy
@@ -84,7 +86,7 @@ What each rule catches, and which ones live in `rust` versus `opinionated`:
 | `--color` | Colorize text output. |
 | `--strict` | Include findings hidden by source suppressions so exceptions stay auditable. |
 | `--verbose`, `-v` | Print ruleset load diagnostics when a policy is not loading as expected. |
-| `--ignore-errors-on-exit` | Return success despite operational or processing errors. Report contents still include the errors. |
+| `--ignore-errors-on-exit` | Ignore processing errors when selecting the exit status. Error output stays visible. |
 | `--ignore-violations-on-exit` | Return success despite findings. Useful while adopting; report contents stay complete. |
 
 ## Exit status

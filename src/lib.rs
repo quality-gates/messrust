@@ -285,6 +285,15 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
 
     let report = analyze_files(&files, &rules, opt.behavior.strict, opt.input.ignore_tests);
 
+    if matches!(
+        format,
+        ReportFormat::Html | ReportFormat::Sarif | ReportFormat::Gitlab | ReportFormat::Checkstyle
+    ) {
+        for error in &report.errors {
+            let _ = writeln!(stderr, "error: {}: {}", error.file, error.message);
+        }
+    }
+
     if let Err(error) = render_report(format, &report, &opt.output, stdout) {
         let _ = writeln!(stderr, "error: {error}");
         return EXIT_ERROR;
