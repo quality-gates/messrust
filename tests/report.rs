@@ -1084,3 +1084,87 @@ fn checkstyle_and_xml_escape_ampersand_in_file_name() {
     assert!(out.contains("&amp;"));
     assert!(!out.contains(&format!("name=\"{}\"", path.display())));
 }
+
+// ----- processing errors in formats without an error field -----------------
+
+fn broken_plus_valid(root: &Path) -> PathBuf {
+    write_file(root, "ok.rs", &fn_with_n_params("entry_point", 11));
+    write_file(root, "bad.rs", "fn broken( {\n")
+}
+
+fn stderr_error_line(root: &Path) -> String {
+    format!(
+        "error: {}: cannot parse string into token stream\n",
+        root.join("bad.rs").display()
+    )
+}
+
+#[test]
+fn formats_without_error_field_print_processing_errors_to_stderr() {
+    let (_td, root) = tmp();
+    broken_plus_valid(&root);
+    let root_str = root.to_str().unwrap().to_string();
+    for format in ["html", "sarif", "gitlab", "checkstyle"] {
+        let (code, out, err) = run_cli(&[&root_str, format, "codesize"]);
+        assert_eq!(
+            code, EXIT_ERROR,
+            "format={format} stdout={out:?} stderr={err:?}"
+        );
+        assert_eq!(err, stderr_error_line(&root), "format={format}");
+        assert!(
+            out.contains("ExcessiveParameterList"),
+            "format={format} out={out}"
+        );
+        assert!(
+            !out.contains(&root.join("bad.rs").display().to_string()),
+            "payload schema must stay unchanged: format={format} out={out}"
+        );
+    }
+}
+
+#[test]
+fn formats_without_error_field_print_errors_with_reportfile_and_ignore_flag() {
+    let (_td, root) = tmp();
+    broken_plus_valid(&root);
+    let root_str = root.to_str().unwrap().to_string();
+    for format in ["html", "sarif", "gitlab", "checkstyle"] {
+        let report = root.join(format!("out.{format}"));
+        let (code, out, err) = run_cli(&[
+            &root_str,
+            format,
+            "codesize",
+            "--reportfile",
+            report.to_str().unwrap(),
+        ]);
+        assert_eq!(code, EXIT_ERROR, "format={format} stderr={err:?}");
+        assert_eq!(out, "", "format={format}");
+        assert_eq!(err, stderr_error_line(&root), "format={format}");
+        let body = fs::read_to_string(&report).unwrap();
+        assert!(
+            body.contains("ExcessiveParameterList"),
+            "format={format} body={body}"
+        );
+
+        let (code, out, err) = run_cli(&[&root_str, format, "codesize", "--ignore-errors-on-exit"]);
+        assert_eq!(code, EXIT_VIOLATION, "format={format} stderr={err:?}");
+        assert_eq!(err, stderr_error_line(&root), "format={format}");
+        assert!(
+            out.contains("ExcessiveParameterList"),
+            "format={format} out={out}"
+        );
+    }
+}
+
+#[test]
+fn formats_with_error_field_do_not_duplicate_errors_to_stderr() {
+    let (_td, root) = tmp();
+    broken_plus_valid(&root);
+    let root_str = root.to_str().unwrap().to_string();
+    let bad = root.join("bad.rs").display().to_string();
+    for format in ["text", "ansi", "json", "xml", "github"] {
+        let (code, out, err) = run_cli(&[&root_str, format, "codesize"]);
+        assert_eq!(code, EXIT_ERROR, "format={format} stderr={err:?}");
+        assert!(err.is_empty(), "format={format} stderr={err:?}");
+        assert!(out.contains(&bad), "format={format} out={out}");
+    }
+}

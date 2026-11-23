@@ -290,11 +290,24 @@ fn run_analysis(opt: Options, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         return EXIT_ERROR;
     }
 
+    print_unreported_errors(format, &report, stderr);
+
     exit_code_for(
         &report,
         opt.behavior.ignore_errors,
         opt.behavior.ignore_violations,
     )
+}
+
+fn print_unreported_errors(format: ReportFormat, report: &Report, stderr: &mut dyn Write) {
+    // Formats without an error field keep their payload schemas unchanged.
+    // Print each processing error once on standard error instead.
+    if format.encodes_processing_errors() {
+        return;
+    }
+    for error in &report.errors {
+        let _ = writeln!(stderr, "error: {}: {}", error.file, error.message);
+    }
 }
 
 fn render_report(
