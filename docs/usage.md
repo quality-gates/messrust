@@ -37,6 +37,12 @@ and suppression fields. Findings sort by file and source line.
 `--reportfile <path>` writes the report to a file and leaves stdout empty.
 `--color` colorizes text output.
 
+A malformed or unreadable file becomes a processing error. The `text`,
+`ansi`, `json`, `xml`, and `github` formats hold the error in the report.
+The `html`, `sarif`, `gitlab`, and `checkstyle` formats do not hold the error;
+they print each error once on standard error instead. Their report files
+stay unchanged.
+
 ## Choose a policy
 
 | Ruleset | Intent |

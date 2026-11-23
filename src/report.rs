@@ -98,6 +98,15 @@ impl ReportFormat {
         NAMES[*self as usize]
     }
 
+    // True when the report payload already holds processing errors.
+    // Other format writers report errors on standard error instead.
+    pub(crate) fn encodes_processing_errors(&self) -> bool {
+        match self {
+            Self::Text | Self::Ansi | Self::Json | Self::Xml | Self::Github => true,
+            Self::Html | Self::Gitlab | Self::Checkstyle | Self::Sarif => false,
+        }
+    }
+
     pub(crate) fn render(
         &self,
         report: &Report,
