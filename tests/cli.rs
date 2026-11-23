@@ -1522,3 +1522,58 @@ fn version_does_not_run_analysis() {
     assert!(!out.contains("ExcessiveParameterList"), "stdout={out:?}");
     assert!(err.is_empty(), "stderr={err:?}");
 }
+
+#[test]
+fn processing_errors_are_visible_for_external_report_formats() {
+    let dir = TempDir::new().unwrap();
+    let bad = write_file(dir.path(), "bad.rs", "fn broken(\n");
+    write_file(dir.path(), "good.rs", &fixture_with_params(11));
+    let report_file = dir.path().join("report.out");
+    for format in ["html", "sarif", "gitlab", "checkstyle"] {
+        for ignore in [false, true] {
+            for to_file in [false, true] {
+                let mut args = vec![dir.path().to_str().unwrap(), format, "codesize"];
+                if ignore {
+                    args.push("--ignore-errors-on-exit");
+                }
+                if to_file {
+                    args.extend(["--reportfile", report_file.to_str().unwrap()]);
+                }
+                let (code, out, err) = run_cli(&args);
+                let expected = if ignore { EXIT_VIOLATION } else { EXIT_ERROR };
+                assert_eq!(code, expected, "format={format} stderr={err:?}");
+                assert_eq!(
+                    err.matches(bad.to_str().unwrap()).count(),
+                    1,
+                    "format={format} stderr={err:?}"
+                );
+                assert!(
+                    err.contains("cannot parse"),
+                    "format={format} stderr={err:?}"
+                );
+                let report = if to_file {
+                    assert!(out.is_empty(), "format={format} stdout={out:?}");
+                    fs::read_to_string(&report_file).unwrap()
+                } else {
+                    out
+                };
+                assert!(
+                    report.contains("ExcessiveParameterList"),
+                    "format={format} report={report:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn formats_with_processing_errors_in_the_report_do_not_duplicate_stderr() {
+    let dir = TempDir::new().unwrap();
+    write_file(dir.path(), "bad.rs", "fn broken(\n");
+    for format in ["text", "ansi", "json", "xml", "github"] {
+        let (code, out, err) = run_cli(&[dir.path().to_str().unwrap(), format, "codesize"]);
+        assert_eq!(code, EXIT_ERROR, "format={format} stderr={err:?}");
+        assert!(out.contains("bad.rs"), "format={format} stdout={out:?}");
+        assert!(err.is_empty(), "format={format} stderr={err:?}");
+    }
+}
