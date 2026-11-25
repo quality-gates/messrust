@@ -90,6 +90,13 @@ fn long_binary_operator_chain(terms: usize, op: &str) -> String {
     source
 }
 
+fn deep_reference_type_chain(prefix: &str, depth: usize) -> String {
+    let mut source = String::from("fn func(param: ");
+    source.extend(std::iter::repeat_n(prefix, depth));
+    source.push_str("i32) {}\n");
+    source
+}
+
 fn long_addition_chain(terms: usize) -> String {
     let mut source = String::from("fn f() -> i32 { ");
     for i in 0..terms {
@@ -503,6 +510,52 @@ fn scanning_good_file_and_over_deep_file_with_ignore_errors_exits_two() {
     assert!(
         out.contains(&format!("{}\t-\t", deep.display())),
         "over-deep file must produce a processing error: stdout={out:?}"
+    );
+    assert!(
+        out.contains(valid.to_str().unwrap()) && out.contains("ExcessiveParameterList"),
+        "the valid file must still be analyzed: stdout={out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+#[test]
+fn deep_reference_pointer_type_chains_are_processing_errors() {
+    let cases = [
+        ("reference.rs", deep_reference_type_chain("&", 300)),
+        ("mutref.rs", deep_reference_type_chain("&mut ", 300)),
+        ("constptr.rs", deep_reference_type_chain("*const ", 300)),
+        ("mutptr.rs", deep_reference_type_chain("*mut ", 300)),
+    ];
+    for (name, source) in cases {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(dir.path(), name, &source);
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "codesize"]);
+        assert_eq!(code, EXIT_ERROR, "name={name} stdout={out:?} stderr={err:?}");
+        assert!(
+            out.contains(&format!("{}\t-\t", path.display())),
+            "deep type chain must produce a processing error: name={name} stdout={out:?}"
+        );
+        assert!(err.is_empty(), "name={name} stderr={err:?}");
+    }
+}
+
+#[test]
+fn deep_reference_type_chain_and_good_file_reports_both_and_exits_one() {
+    let dir = TempDir::new().unwrap();
+    let deep = write_file(
+        dir.path(),
+        "bad.rs",
+        &deep_reference_type_chain("&", 300),
+    );
+    let valid = write_file(dir.path(), "valid.rs", &fixture_with_params(11));
+    let paths = format!("{},{}", deep.display(), valid.display());
+
+    let (code, out, err) = run_cli(&[&paths, "text", "codesize"]);
+
+    assert_eq!(code, EXIT_ERROR, "stdout={out:?} stderr={err:?}");
+    assert!(
+        out.contains(&format!("{}\t-\t", deep.display())),
+        "deep type chain must produce a processing error: stdout={out:?}"
     );
     assert!(
         out.contains(valid.to_str().unwrap()) && out.contains("ExcessiveParameterList"),
