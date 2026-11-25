@@ -4,7 +4,7 @@ use proc_macro2::{Spacing, TokenStream, TokenTree};
 // These limits prevent stack overflow in both debug and release builds.
 const MAX_GROUP_DEPTH: usize = 256;
 const MAX_GENERIC_DEPTH: usize = 64;
-const MAX_OPERATOR_CHAIN: usize = 500;
+const MAX_OPERATOR_CHAIN: usize = 256;
 const DEEP_PARSE_ERROR: &str = "source nesting exceeds parser safety limit";
 
 fn deep_parse_error(limit: usize) -> String {
@@ -24,6 +24,9 @@ struct FrameState {
     operator_chain: usize,
     prev_punct: Option<(char, Spacing)>,
     expects_operand: bool,
+    // True when the last `&` started a unary reference prefix, so a joint
+    // second `&` is another level rather than a binary `&&` operator.
+    reference_prefix: bool,
 }
 
 pub(crate) fn parse_file(source: &str) -> Result<syn::File, String> {
@@ -76,6 +79,7 @@ fn process_token(
             if let Some(frame) = frames.last_mut() {
                 frame.prev_punct = None;
                 frame.expects_operand = false;
+                frame.reference_prefix = false;
             }
             streams.push(group.stream().into_iter());
             frames.push(FrameState {
@@ -87,6 +91,7 @@ fn process_token(
         TokenTree::Ident(ident) => {
             let frame = frames.last_mut().unwrap();
             frame.prev_punct = None;
+            frame.reference_prefix = false;
             let text = ident.to_string();
             if matches!(
                 text.as_str(),
@@ -98,7 +103,6 @@ fn process_token(
                     | "trait"
                     | "mod"
                     | "use"
-                    | "const"
                     | "static"
                     | "return"
                     | "match"
@@ -117,6 +121,7 @@ fn process_token(
         TokenTree::Literal(_) => {
             let frame = frames.last_mut().unwrap();
             frame.prev_punct = None;
+            frame.reference_prefix = false;
             frame.expects_operand = false;
             reset_closure(closure_state);
         }
@@ -140,11 +145,13 @@ fn handle_separator(ch: char, frame: &mut FrameState, closure_state: &mut Closur
     if ch == ';' {
         frame.operator_chain = 0;
         frame.generic_depth = 0;
+        frame.reference_prefix = false;
         frame.expects_operand = true;
         reset_closure(closure_state);
         true
     } else if ch == ',' {
         frame.operator_chain = 0;
+        frame.reference_prefix = false;
         frame.expects_operand = true;
         if frame.generic_depth == 0 {
             reset_closure(closure_state);
@@ -211,30 +218,44 @@ fn handle_compound_syntax(
             frame.expects_operand = true;
             Ok(true)
         }
-        ('&', '&') | ('=', '=') | ('!', '=') => {
+        ('&', '&') => {
+            if frame.reference_prefix {
+                record_operator(frame)?;
+            }
             frame.generic_depth = 0;
             frame.expects_operand = true;
             Ok(true)
         }
-        ('<', '=') | ('>', '=') => {
-            frame.generic_depth = frame.generic_depth.saturating_sub(1);
+        ('=', '=') | ('!', '=') => {
+            frame.generic_depth = 0;
             frame.expects_operand = true;
             Ok(true)
         }
+        ('<', '=') | ('>', '=') | ('<', '<') | ('>', '>') => {
+            handle_shift_pair(prev_ch, ch, frame)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_shift_pair(prev_ch: char, ch: char, frame: &mut FrameState) -> Result<bool, String> {
+    match (prev_ch, ch) {
         ('<', '<') => {
             frame.generic_depth += 1;
             if frame.generic_depth > MAX_GENERIC_DEPTH {
                 return Err(deep_parse_error(MAX_GENERIC_DEPTH));
             }
             frame.expects_operand = true;
-            Ok(true)
         }
         ('>', '>') => {
             frame.generic_depth = frame.generic_depth.saturating_sub(1);
-            Ok(true)
         }
-        _ => Ok(false),
+        _ => {
+            frame.generic_depth = frame.generic_depth.saturating_sub(1);
+            frame.expects_operand = true;
+        }
     }
+    Ok(true)
 }
 
 fn handle_compound_assign(
@@ -286,6 +307,9 @@ fn handle_standard_punct(
     } else if ch == ':' {
         frame.expects_operand = true;
     } else if matches!(ch, '+' | '-' | '*' | '/' | '%' | '^' | '&' | '!' | '.') {
+        if ch == '&' {
+            frame.reference_prefix = frame.expects_operand;
+        }
         record_operator(frame)?;
         frame.expects_operand = true;
     }
@@ -373,6 +397,7 @@ fn close_stream(
     *group_depth = group_depth.saturating_sub(1);
     if let Some(frame) = frames.last_mut() {
         frame.prev_punct = None;
+        frame.reference_prefix = false;
     }
     reset_closure_body(closure_state);
 }
@@ -472,7 +497,57 @@ mod tests {
 
         assert_eq!(
             parse_file(&source).err().as_deref(),
-            Some("source nesting exceeds parser safety limit of 500")
+            Some("source nesting exceeds parser safety limit of 256")
+        );
+    }
+
+    fn deep_type_source(prefix: &str, depth: usize) -> String {
+        let mut source = String::from("fn func(x: ");
+        source.extend(std::iter::repeat_n(prefix, depth));
+        source.push_str("i32) {}\n");
+        source
+    }
+
+    #[test]
+    fn rejects_deep_contiguous_reference_chain_before_syn_parses() {
+        assert_eq!(
+            parse_file(&deep_type_source("&", 300)).err().as_deref(),
+            Some("source nesting exceeds parser safety limit of 256")
+        );
+    }
+
+    #[test]
+    fn rejects_deep_mutable_reference_chain_before_syn_parses() {
+        assert_eq!(
+            parse_file(&deep_type_source("&mut ", 300)).err().as_deref(),
+            Some("source nesting exceeds parser safety limit of 256")
+        );
+    }
+
+    #[test]
+    fn rejects_deep_const_pointer_chain_before_syn_parses() {
+        assert_eq!(
+            parse_file(&deep_type_source("*const ", 300)).err().as_deref(),
+            Some("source nesting exceeds parser safety limit of 256")
+        );
+    }
+
+    #[test]
+    fn rejects_deep_mutable_pointer_chain_before_syn_parses() {
+        assert_eq!(
+            parse_file(&deep_type_source("*mut ", 300)).err().as_deref(),
+            Some("source nesting exceeds parser safety limit of 256")
+        );
+    }
+
+    #[test]
+    fn rejects_deep_contiguous_reference_expression_before_syn_parses() {
+        let mut source = String::from("fn main() { let _ = ");
+        source.extend(std::iter::repeat_n('&', 1000));
+        source.push_str("value; }\n");
+        assert_eq!(
+            parse_file(&source).err().as_deref(),
+            Some("source nesting exceeds parser safety limit of 256")
         );
     }
 
