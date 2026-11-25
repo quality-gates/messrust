@@ -67,6 +67,7 @@ fn pack_install_smoke_spawns_real_binary() {
     let (code, out, err) = run_cargo(
         &[
             "package",
+            "--locked",
             "--allow-dirty",
             "--target-dir",
             target_dir_arg,
@@ -92,6 +93,7 @@ fn pack_install_smoke_spawns_real_binary() {
     let (code, out, err) = run_cargo(
         &[
             "install",
+            "--locked",
             "--path",
             packaged.to_str().unwrap(),
             "--root",
@@ -105,6 +107,11 @@ fn pack_install_smoke_spawns_real_binary() {
     assert_eq!(
         code, 0,
         "cargo install failed\nstdout={out}\nstderr={err}"
+    );
+    // A fresh resolve prints "Locking"; a locked install must not.
+    assert!(
+        !err.contains("Locking"),
+        "cargo install must use Cargo.lock (--locked), not resolve afresh\nstdout={out}\nstderr={err}"
     );
 
     let bin_name = if cfg!(windows) {
