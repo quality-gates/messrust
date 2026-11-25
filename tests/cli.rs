@@ -1363,6 +1363,56 @@ fn two_positionals_print_usage_and_exits_one() {
 }
 
 #[test]
+fn extra_positional_exits_one_and_names_it() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "fixture.rs",
+        "fn f() { let unused_variable_name = 1; }\n",
+    );
+    for extra in ["EXTRA_POSITIONAL", "-"] {
+        let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", "rust", extra]);
+        assert_eq!(code, EXIT_ERROR, "extra={extra}");
+        assert!(out.is_empty(), "extra={extra} stdout={out:?}");
+        let expected = format!("error: unexpected argument: {extra}");
+        assert!(err.contains(&expected), "extra={extra} stderr={err:?}");
+    }
+    // The first extra positional is named when several extras are present.
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "rust",
+        "FIRST_EXTRA",
+        "SECOND_EXTRA",
+    ]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("error: unexpected argument: FIRST_EXTRA"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn extra_positional_before_an_option_still_exits_one() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(dir.path(), "fixture.rs", &fixture_with_params(0));
+    let (code, out, err) = run_cli(&[
+        path.to_str().unwrap(),
+        "text",
+        "codesize",
+        "EXTRA_POSITIONAL",
+        "--ignore-tests",
+    ]);
+    assert_eq!(code, EXIT_ERROR);
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("error: unexpected argument: EXTRA_POSITIONAL"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
 fn usage_lists_every_documented_option_name() {
     let (code, out, err) = run_cli(&["--help"]);
     assert_eq!(code, EXIT_SUCCESS);

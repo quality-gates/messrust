@@ -110,6 +110,11 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         return EXIT_ERROR;
     }
 
+    if positionals.len() > 3 {
+        let _ = writeln!(stderr, "error: unexpected argument: {}", positionals[3]);
+        return EXIT_ERROR;
+    }
+
     opt.input.paths = split_list(&positionals[0]);
     opt.output.format = positionals[1].clone();
     opt.rules.rulesets = split_list(&positionals[2]);
