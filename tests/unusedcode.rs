@@ -979,3 +979,60 @@ pub fn f(r#unused: i32) {}
         "Avoid unused parameters such as 'r#unused'.",
     );
 }
+
+#[test]
+fn unused_rules_report_caseless_script_bindings_and_ignore_uppercase_patterns() {
+    let dir = TempDir::new().unwrap();
+    let path = write_file(
+        dir.path(),
+        "caseless_unused.rs",
+        r#"
+const CONST_PAT: i32 = 0;
+
+pub fn f(变量: i32, שלום: i32) {
+    let 値 = 1;
+    let 변수 = 2;
+    let متغير = 3;
+    if let CONST_PAT = 0 {}
+}
+"#,
+    );
+    let (code, out, err) = run_only(&path, "UnusedLocalVariable,UnusedFormalParameter");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "UnusedFormalParameter",
+        "Avoid unused parameters such as '变量'.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "UnusedFormalParameter",
+        "Avoid unused parameters such as 'שלום'.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        5,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as '値'.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        6,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as '변수'.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        7,
+        "UnusedLocalVariable",
+        "Avoid unused local variables such as 'متغير'.",
+    );
+    assert!(!out.contains("CONST_PAT"), "stdout={out:?}");
+}

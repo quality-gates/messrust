@@ -1257,3 +1257,49 @@ fn short_name_exceptions_match_raw_identifier_without_r_hash_prefix() {
     let (code, out, err) = run_cli(&[path.to_str().unwrap(), "text", ruleset.to_str().unwrap()]);
     assert_eq!(code, EXIT_SUCCESS, "stdout={out:?} stderr={err:?}");
 }
+
+#[test]
+fn variable_naming_rules_report_caseless_script_bindings() {
+    let dir = TempDir::new().unwrap();
+    let long_cjk = "变".repeat(21);
+    let path = write_file(
+        dir.path(),
+        "caseless_naming.rs",
+        &format!(
+            r#"
+const CONST_PAT: i32 = 0;
+
+pub fn check_caseless(变量: i32) {{
+    let 値 = 1;
+    let {long_cjk} = 2;
+    let _ = (变量, 値, {long_cjk});
+    if let CONST_PAT = 0 {{}}
+}}
+"#
+        ),
+    );
+    let (code, out, err) = run_only(&path, "ShortVariable,LongVariable");
+    assert_eq!(code, EXIT_VIOLATION, "stderr={err:?} stdout={out:?}");
+    assert_finding(
+        &out,
+        &path,
+        4,
+        "ShortVariable",
+        "Avoid variables with short names like 变量. Configured minimum length is 3.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        5,
+        "ShortVariable",
+        "Avoid variables with short names like 値. Configured minimum length is 3.",
+    );
+    assert_finding(
+        &out,
+        &path,
+        6,
+        "LongVariable",
+        &format!("Avoid excessively long variable names like {long_cjk}. Keep variable name length under 20."),
+    );
+    assert!(!out.contains("CONST_PAT"), "stdout={out:?}");
+}

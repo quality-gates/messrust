@@ -9,7 +9,7 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{FnArg, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemUnion, Member};
 
-use crate::analyze::helpers::is_private;
+use crate::analyze::helpers::{is_private, name_after_raw_prefix};
 
 use super::{NamedSite, UseDefModel};
 
@@ -443,7 +443,9 @@ pub(crate) fn path_last_ident(path: &syn::ExprPath) -> Option<String> {
 
 pub(crate) fn is_binding_name(name: &str) -> bool {
     // Syn never feeds the `self` receiver through PatIdent bindings we record.
-    name.starts_with(|ch: char| ch.is_lowercase() || ch == '_')
+    // Exclude uppercase-starting names (constant patterns) while allowing
+    // lowercase, `_`-prefixed, and caseless-script (CJK, Hangul, etc.) bindings.
+    name_after_raw_prefix(name).starts_with(|ch: char| !ch.is_uppercase())
 }
 
 #[cfg(test)]
@@ -476,5 +478,25 @@ mod tests {
         assert!(format_capture_names("{:1$}").is_empty());
         assert!(format_capture_names("{}").is_empty());
         assert!(format_capture_names("{0}").is_empty());
+    }
+
+    #[test]
+    fn is_binding_name_accepts_caseless_scripts_and_rejects_uppercase_patterns() {
+        assert!(is_binding_name("value"));
+        assert!(is_binding_name("_unused"));
+        assert!(is_binding_name("αβ"));
+        assert!(is_binding_name("变量"));
+        assert!(is_binding_name("値"));
+        assert!(is_binding_name("변수"));
+        assert!(is_binding_name("שלום"));
+        assert!(is_binding_name("متغير"));
+        assert!(is_binding_name("r#type"));
+        assert!(is_binding_name("r#变量"));
+        assert!(!is_binding_name("Abc"));
+        assert!(!is_binding_name("CONST_PAT"));
+        assert!(!is_binding_name("Αβ"));
+        assert!(!is_binding_name("r#Abc"));
+        assert!(!is_binding_name(""));
+        assert!(!is_binding_name("r#"));
     }
 }
